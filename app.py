@@ -17,7 +17,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from agent import create_graph
 
@@ -83,11 +83,23 @@ def main() -> None:
 
         response_content = ""
         for event in graph.stream(state, stream_mode="values"):
-            # The last message in the event is the AI response
             if event.get("messages"):
                 last_msg = event["messages"][-1]
-                # Only print the new AI message content
-                if hasattr(last_msg, "content") and last_msg.content != response_content:
+
+                # Skip ToolMessages (raw JSON from tools)
+                if isinstance(last_msg, ToolMessage):
+                    continue
+
+                # Skip AIMessages that contain tool_calls (routing decisions)
+                if getattr(last_msg, "tool_calls", None):
+                    continue
+
+                # Print only the final AI text response
+                if (
+                    hasattr(last_msg, "content")
+                    and last_msg.content
+                    and last_msg.content != response_content
+                ):
                     new_text = last_msg.content[len(response_content):]
                     print(new_text, end="", flush=True)
                     response_content = last_msg.content

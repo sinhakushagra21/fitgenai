@@ -5,6 +5,8 @@ Shared state schema for the FITGEN.AI conversational agent.
 
 The state flows through every node in the LangGraph graph and carries
 the full conversation history plus optional user-profile metadata.
+Routing is handled by the base LLM's tool-calling decisions — no
+explicit routing field is needed.
 """
 
 from __future__ import annotations
@@ -16,19 +18,18 @@ from typing_extensions import TypedDict
 
 
 class AgentState(TypedDict):
-    """State that is threaded through the FITGEN.AI LangGraph graph.
+    """State threaded through the FITGEN.AI LangGraph graph.
 
     Attributes
     ----------
     messages : list
-        Conversation history managed by LangGraph's built-in message
-        reducer (``add_messages``).  Each element is a LangChain
-        ``BaseMessage`` (HumanMessage, AIMessage, SystemMessage, …).
+        Full conversation history managed by LangGraph's built-in
+        ``add_messages`` reducer.  Includes HumanMessages, AIMessages
+        (with optional tool_calls), and ToolMessages (tool responses).
     user_profile : dict
-        Optional dictionary holding user-supplied fitness context such as
-        fitness goals, experience level, dietary preferences, injuries,
-        available equipment, etc.  Populated during the intake phase and
-        referenced by the chatbot node when generating personalised plans.
+        Optional user fitness context: goals, experience, equipment,
+        injuries, dietary preferences, etc.  Accumulated during intake
+        and passed as context to specialist tools.
     """
 
     messages: Annotated[list, add_messages]
