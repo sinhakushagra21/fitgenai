@@ -40,6 +40,7 @@ from langchain_openai import ChatOpenAI
 from agent.prompts.base_prompts import (
     BASE_ANALOGICAL,
     BASE_COT,
+    BASE_DECOMPOSITION,
     BASE_FEW_SHOT,
     BASE_GENERATE_KNOWLEDGE,
     BASE_PROMPTS,
@@ -59,6 +60,7 @@ PROMPT_FEW_SHOT           = BASE_FEW_SHOT
 PROMPT_COT                = BASE_COT
 PROMPT_ANALOGICAL         = BASE_ANALOGICAL
 PROMPT_GENERATE_KNOWLEDGE = BASE_GENERATE_KNOWLEDGE
+PROMPT_DECOMPOSITION      = BASE_DECOMPOSITION
 
 # ── Tool-relay instruction ────────────────────────────────────────
 # Appended to every system prompt so the LLM knows what to say after

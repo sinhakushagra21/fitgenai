@@ -15,6 +15,7 @@ TECHNIQUE_KEYS: list[str] = [
     "cot",
     "analogical",
     "generate_knowledge",
+    "decomposition",
 ]
 
 # Human-readable display info per technique
@@ -64,6 +65,16 @@ TECHNIQUE_META: dict[str, dict] = {
         "description": (
             "The model first generates 2–3 relevant scientific facts, "
             "then uses them as the factual basis for its answer."
+        ),
+    },
+    "decomposition": {
+        "label":       "Decomposition",
+        "icon":        "🧩",
+        "color":       "#ad1457",
+        "description": (
+            "The model breaks complex requests into smaller, named "
+            "sub-tasks, solves each independently, then synthesises "
+            "a unified answer."
         ),
     },
 }
