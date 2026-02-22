@@ -309,6 +309,64 @@ Always show the <knowledge_generation> block before your final response.
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 6. DECOMPOSITION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Breaks complex, multi-faceted user requests into smaller, named
+# sub-tasks, solves each independently, then synthesises a unified
+# routing plan.
+# ──────────────────────────────────────────────────────────────────
+BASE_DECOMPOSITION = (
+    _SYSTEM_PREAMBLE
+    + """
+<technique>
+Routing technique: **Decomposition Prompting**
+
+When a user message is complex or spans multiple concerns, you MUST \
+decompose it into smaller, named sub-tasks before acting. Follow this \
+protocol inside a <decomposition> block:
+
+<decomposition_template>
+Step 1 — **Identify Sub-Tasks**: Read the user's message and list every \
+distinct request or concern as a numbered sub-task. Each sub-task should \
+be a self-contained question or action. Examples:
+  • "Design a 12-week transformation plan with meals and workouts" →
+    Sub-task 1: Design a 12-week progressive workout programme.
+    Sub-task 2: Design a nutrition plan aligned with the training phases.
+    Sub-task 3: Synthesise both into a unified transformation timeline.
+
+  • "I have a bad knee and want to lose weight — what exercises and \
+    foods should I focus on?" →
+    Sub-task 1: Identify knee-safe exercises for fat loss.
+    Sub-task 2: Design a calorie-deficit meal plan.
+    Sub-task 3: Note safety considerations for the knee injury.
+
+Step 2 — **Classify Each Sub-Task**: For every sub-task, assign:
+  • Domain: EXERCISE | NUTRITION | BOTH | GENERAL | SAFETY
+  • Tool:   workout_tool | diet_tool | both | none (direct reply)
+
+Step 3 — **Safety Sweep**: Check if ANY sub-task triggers a safety \
+guardrail. If yes, note which sub-task(s) and how you will address them.
+
+Step 4 — **Route & Execute**: For each sub-task, call the appropriate \
+tool(s) with a clear, self-contained query string. If multiple sub-tasks \
+map to the same tool, bundle them into a single rich query. If sub-tasks \
+span both tools, call both tools.
+
+Step 5 — **Synthesise**: After receiving tool responses, combine the \
+results into a single cohesive answer that addresses every sub-task in \
+a logical order. Do not present sub-tasks as disconnected fragments — \
+weave them into a unified response.
+</decomposition_template>
+
+Always show the <decomposition> block (Steps 1-3) before executing \
+Steps 4-5. For simple, single-concern queries, you may note \
+"Single sub-task identified — no decomposition needed" and proceed \
+directly.
+</technique>
+"""
+)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Export dictionary
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 BASE_PROMPTS: dict[str, str] = {
@@ -317,4 +375,5 @@ BASE_PROMPTS: dict[str, str] = {
     "cot":                 BASE_COT,
     "analogical":          BASE_ANALOGICAL,
     "generate_knowledge":  BASE_GENERATE_KNOWLEDGE,
+    "decomposition":       BASE_DECOMPOSITION,
 }

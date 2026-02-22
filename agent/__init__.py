@@ -12,6 +12,7 @@ from agent.base_agent import (
     PROMPT_COT,
     PROMPT_ANALOGICAL,
     PROMPT_GENERATE_KNOWLEDGE,
+    PROMPT_DECOMPOSITION,
 )
 from agent.graph import create_graph
 from agent.state import AgentState
@@ -28,4 +29,5 @@ __all__ = [
     "PROMPT_COT",
     "PROMPT_ANALOGICAL",
     "PROMPT_GENERATE_KNOWLEDGE",
+    "PROMPT_DECOMPOSITION",
 ]

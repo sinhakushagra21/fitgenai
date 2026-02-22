@@ -488,6 +488,100 @@ before starting a new programme.*
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 6. DECOMPOSITION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WORKOUT_DECOMPOSITION = (
+    _WORKOUT_PREAMBLE
+    + """
+<technique>
+Technique: **Decomposition Prompting**
+
+Complex training requests often involve multiple interrelated \
+sub-problems. Before generating ANY programme, you MUST explicitly \
+decompose the request inside a <decomposition> block.
+
+<decomposition_template>
+Step 1 — **Identify Sub-Problems**: Break the user's request into \
+distinct, named sub-problems. Common workout sub-problems include:
+  • **Assessment** — Extract user profile (experience, goals, equipment, \
+    time, injuries).
+  • **Split Selection** — Choose the optimal training split based on \
+    frequency and goals.
+  • **Exercise Selection** — Pick exercises per muscle group, respecting \
+    equipment and injury constraints.
+  • **Volume & Intensity** — Set sets, reps, rest, and RPE/RIR based on \
+    goal and experience level.
+  • **Progression Model** — Define how load/volume increases over time.
+  • **Periodisation** — Structure mesocycles, deloads, and peak phases.
+  • **Recovery & Mobility** — Plan warm-up, cool-down, rest days, and \
+    deload strategy.
+  • **Safety Review** — Check for contraindicated exercises, overtraining \
+    risk, and guardrail triggers.
+
+Step 2 — **Solve Each Sub-Problem**: Address each sub-problem \
+independently, noting the key decision and rationale for each.
+
+Step 3 — **Safety Sweep**: Review all sub-problem solutions together. \
+Confirm:
+  □ Push/pull volume is balanced.
+  □ No exercises contraindicated by stated injuries.
+  □ Volume appropriate for experience level.
+  □ Deload strategy included for programmes > 3 weeks.
+  □ Warm-up and cool-down addressed.
+
+Step 4 — **Synthesise**: Combine all sub-problem solutions into a \
+single, cohesive training programme with clear tables, progression \
+plan, and disclaimer.
+</decomposition_template>
+
+Always show the <decomposition> block (Steps 1-3) before presenting \
+the final programme in Step 4. For simple single-exercise questions, \
+note "Single sub-problem — no decomposition needed" and answer directly.
+
+<example_decomposition query="Design a 12-week transformation plan \
+for an intermediate lifter who wants to build muscle and improve \
+cardiovascular endurance, training 5 days/week with a home gym \
+(barbell, dumbbells, pull-up bar).">
+<decomposition>
+Sub-problem 1 — Assessment:
+  Intermediate lifter, dual goal (hypertrophy + cardio), 5 days/week, \
+  home gym with barbell, dumbbells, pull-up bar. No injuries stated.
+
+Sub-problem 2 — Split Selection:
+  Upper/Lower/Push/Pull/Legs hybrid works well at 5 days. Alternatively, \
+  3 strength + 2 cardio days. Going with Upper–Lower–Push–Pull–Cardio/\
+Conditioning to hit both goals.
+
+Sub-problem 3 — Exercise Selection:
+  Limited to barbell, DB, pull-up bar. Compounds: bench, OHP, squat, \
+  deadlift, barbell row, pull-ups. Accessories: DB curls, lateral \
+  raises, DB lunges, floor press.
+
+Sub-problem 4 — Volume & Intensity:
+  Intermediate: 12-16 sets/muscle/week. Strength days: 4-6 reps. \
+  Hypertrophy days: 8-12 reps. Cardio: 2 sessions (1 HIIT, 1 LISS).
+
+Sub-problem 5 — Periodisation:
+  12 weeks = 3 mesocycles × 4 weeks (3 progressive + 1 deload). \
+  Mesocycle 1: Foundation. Mesocycle 2: Intensification. \
+  Mesocycle 3: Peak + test.
+
+Sub-problem 6 — Recovery:
+  2 rest days/week. Deload every 4th week (volume −40%). \
+  Warm-up: 5 min + activation. Cool-down: stretching + foam roll.
+
+Safety Sweep: No injuries. Push/pull balanced. Volume within \
+intermediate MAV. Deload included. ✓
+</decomposition>
+
+[Programme tables follow, synthesising all sub-problems into a \
+unified 12-week plan…]
+</example_decomposition>
+</technique>
+"""
+)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Export dictionary
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WORKOUT_PROMPTS: dict[str, str] = {
@@ -496,4 +590,5 @@ WORKOUT_PROMPTS: dict[str, str] = {
     "cot":                 WORKOUT_COT,
     "analogical":          WORKOUT_ANALOGICAL,
     "generate_knowledge":  WORKOUT_GENERATE_KNOWLEDGE,
+    "decomposition":       WORKOUT_DECOMPOSITION,
 }

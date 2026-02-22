@@ -409,6 +409,112 @@ AFTER writing the <knowledge_generation> block:
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 6. DECOMPOSITION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DIET_DECOMPOSITION = (
+    _DIET_PREAMBLE
+    + """
+<technique>
+Technique: **Decomposition Prompting**
+
+Complex nutrition requests involve multiple interrelated sub-problems. \
+Before generating ANY meal plan or nutrition recommendation, you MUST \
+explicitly decompose the request inside a <decomposition> block.
+
+<decomposition_template>
+Step 1 — **Identify Sub-Problems**: Break the user's request into \
+distinct, named sub-problems. Common nutrition sub-problems include:
+  • **Assessment** — Extract user profile (weight, height, age, sex, \
+    activity level, goal, dietary restrictions, allergies, medical flags).
+  • **Energy Calculation** — Compute BMR, TDEE, and caloric target \
+    (surplus/deficit/maintenance).
+  • **Macro Split** — Determine protein, carbohydrate, and fat targets \
+    in grams and kcal, with arithmetic verification.
+  • **Meal Architecture** — Decide number of meals, timing (especially \
+    pre/post-workout), and per-meal macro distribution.
+  • **Food Selection** — Choose specific whole foods that meet macro \
+    targets, respect restrictions/allergies, and align with preferences.
+  • **Supplementation** — Identify evidence-based supplements relevant \
+    to the user's goal (if applicable).
+  • **Hydration** — Set daily water intake target based on body weight \
+    and activity level.
+  • **Safety Review** — Check caloric floor, allergen inclusion, \
+    disordered eating flags, and medical scope.
+
+Step 2 — **Solve Each Sub-Problem**: Address each sub-problem \
+independently, showing key calculations and decisions. For the Energy \
+Calculation sub-problem, show full arithmetic:
+  a) BMR via Mifflin-St Jeor
+  b) TDEE = BMR × activity multiplier
+  c) Target = TDEE ± adjustment
+  d) Macro verification: (protein_g × 4) + (carbs_g × 4) + (fat_g × 9) \
+     = target kcal ±20
+
+Step 3 — **Safety Sweep**: Review all sub-problem solutions together. \
+Confirm:
+  □ Calories above floor (1,500 kcal men / 1,200 kcal women)?
+  □ Protein ≥ 1.6 g/kg for fat loss goals?
+  □ No known allergens included?
+  □ No disordered eating patterns being enabled?
+  □ No controlled substances recommended?
+
+Step 4 — **Synthesise**: Combine all sub-problem solutions into a \
+single cohesive meal plan with:
+  • Macro summary table
+  • Per-meal breakdown with individual kcal and protein values
+  • Meal total verification: sum of meal kcal = target ±20
+  • Disclaimer
+</decomposition_template>
+
+Always show the <decomposition> block (Steps 1-3) before presenting \
+the final plan in Step 4. For simple single-topic questions (e.g., \
+"How much protein do I need?"), note "Single sub-problem — no \
+decomposition needed" and answer directly.
+
+ONE response only. Do NOT append a second generic plan after the first.
+
+<example_decomposition query="I'm a 28-year-old vegetarian female, \
+65 kg, 165 cm, moderately active. I want to lose fat while keeping \
+muscle. I'm also lactose intolerant. Design a full meal plan.">
+<decomposition>
+Sub-problem 1 — Assessment:
+  Female, 28 y/o, 65 kg, 165 cm, moderately active (×1.55). \
+  Goal: fat loss + muscle preservation. Vegetarian + lactose intolerant.
+
+Sub-problem 2 — Energy Calculation:
+  BMR = 10(65) + 6.25(165) − 5(28) − 161 = 1,380 kcal
+  TDEE = 1,380 × 1.55 = 2,139 kcal
+  Target = 2,139 − 400 = 1,739 kcal (rounded to 1,740)
+
+Sub-problem 3 — Macro Split:
+  Protein: 2.0 g/kg = 130 g → 520 kcal
+  Fats: 28% of 1,740 = 487 kcal → 54 g
+  Carbs: 1,740 − 520 − 487 = 733 kcal → 183 g
+  Check: 520 + 733 + 487 = 1,740 kcal ✓
+
+Sub-problem 4 — Meal Architecture:
+  4 meals (breakfast, lunch, snack, dinner). Pre/post-workout \
+  carbs around lunch training slot.
+
+Sub-problem 5 — Food Selection:
+  Vegetarian + lactose-free: tofu, tempeh, lentils, chickpeas, \
+  eggs, lactose-free yogurt, quinoa, oats, nuts, seeds, edamame, \
+  plant-based protein powder.
+
+Sub-problem 6 — Hydration:
+  65 kg × 0.035 L/kg = ~2.3 L/day minimum.
+
+Safety Sweep: 1,740 > 1,200 ✓. Protein 2.0 g/kg ✓. No dairy \
+in plan ✓. No disordered eating flags ✓.
+</decomposition>
+
+[Full meal plan follows, synthesising all sub-problems…]
+</example_decomposition>
+</technique>
+"""
+)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Export dictionary
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DIET_PROMPTS: dict[str, str] = {
@@ -417,4 +523,5 @@ DIET_PROMPTS: dict[str, str] = {
     "cot":                 DIET_COT,
     "analogical":          DIET_ANALOGICAL,
     "generate_knowledge":  DIET_GENERATE_KNOWLEDGE,
+    "decomposition":       DIET_DECOMPOSITION,
 }
