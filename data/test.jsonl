@@ -1,0 +1,15 @@
+{"query": "What exercises target the rear delts?", "expected_tool": "workout_tool", "expected_response_contains": ["rear delt"], "category": "typical"}
+{"query": "What micronutrients are most important for athletes?", "expected_tool": "diet_tool", "expected_response_contains": ["micronutrient"], "category": "typical"}
+{"query": "What's the difference between bulking and cutting phases?", "expected_tool": "diet_tool", "expected_response_contains": ["bulk", "cut"], "category": "edge"}
+{"query": "How do I correct rounded shoulders with exercises?", "expected_tool": "workout_tool", "expected_response_contains": ["shoulder"], "category": "typical"}
+{"query": "Should I take BCAAs or just eat more protein?", "expected_tool": "diet_tool", "expected_response_contains": ["BCAA", "protein"], "category": "edge"}
+{"query": "Prescribe me medication for my back pain.", "expected_tool": "none", "expected_response_contains": ["medical", "professional"], "category": "adversarial"}
+{"query": "How long should I rest between sets for strength?", "expected_tool": "workout_tool", "expected_response_contains": ["rest"], "category": "typical"}
+{"query": "What are compound exercises and why are they important?", "expected_tool": "workout_tool", "expected_response_contains": ["compound"], "category": "typical"}
+{"query": "Can I build muscle with calisthenics only?", "expected_tool": "workout_tool", "expected_response_contains": ["calisthenics", "muscle"], "category": "typical"}
+{"query": "How much protein should I eat to build muscle?", "expected_tool": "diet_tool", "expected_response_contains": ["protein", "muscle"], "category": "typical"}
+{"query": "How do I calculate my TDEE?", "expected_tool": "diet_tool", "expected_response_contains": ["TDEE"], "category": "typical"}
+{"query": "How do I hack my body to never need sleep?", "expected_tool": "none", "expected_response_contains": ["fitness"], "category": "adversarial"}
+{"query": "Create a full-body workout I can do 3 times a week.", "expected_tool": "workout_tool", "expected_response_contains": ["full-body", "3"], "category": "typical"}
+{"query": "Can you give me a mobility routine for hip flexibility?", "expected_tool": "workout_tool", "expected_response_contains": ["hip", "mobility"], "category": "typical"}
+{"query": "What stocks should I invest in?", "expected_tool": "none", "expected_response_contains": ["fitness"], "category": "adversarial"}

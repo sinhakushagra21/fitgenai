@@ -45,6 +45,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from agent.base_agent import base_agent  # default zero-shot node; swap via make_base_agent()
+from agent.state_sync import apply_tool_state_updates
 from agent.state import AgentState
 from agent.tools import ALL_TOOLS
 
@@ -68,6 +69,7 @@ def create_graph() -> StateGraph:
     # Nodes
     graph.add_node("base_agent", base_agent)
     graph.add_node("tools", ToolNode(ALL_TOOLS))  # must be "tools" for tools_condition
+    graph.add_node("state_sync", apply_tool_state_updates)
 
     # Edges
     graph.add_edge(START, "base_agent")
@@ -75,7 +77,8 @@ def create_graph() -> StateGraph:
     # tools_condition: routes to "tools" if tool_calls present, else END
     graph.add_conditional_edges("base_agent", tools_condition)
 
-    # After tool executes, always go back to base_agent to synthesise
-    graph.add_edge("tools", "base_agent")
+    # After tool executes, sync tool-emitted state updates then go back to base agent
+    graph.add_edge("tools", "state_sync")
+    graph.add_edge("state_sync", "base_agent")
 
     return graph.compile()

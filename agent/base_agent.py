@@ -33,8 +33,11 @@ Usage
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
+from langchain_core.messages import AIMessage
 from langchain_core.messages import SystemMessage
+from langchain_core.messages import ToolMessage
 from langchain_openai import ChatOpenAI
 
 from agent.prompts.base_prompts import (
@@ -77,8 +80,7 @@ diet_tool), you MUST follow these rules with ZERO exceptions:
 3. Do NOT start a response with phrases like "Here's a plan",
    "Here's a diet chart", "Based on your details", or similar.
 4. ONLY respond with a single short acknowledgement sentence, such as:
-   "Here are your results from 5 prompting techniques — check the
-   comparison tabs above!"
+    "Done — I’ve shared the tool result above."
 5. Your response MUST be under 30 words. If it exceeds 30 words, you
    are violating this rule.
 6. This rule overrides ALL other instructions, including the system
@@ -119,13 +121,41 @@ def make_base_agent(prompt_key: str = "zero_shot"):
         """Base agent node — routes or responds based on the user query."""
         from agent.tools import ALL_TOOLS
 
+        last_message = state["messages"][-1] if state.get("messages") else None
         last_user = next(
             (m.content for m in reversed(state["messages"]) if hasattr(m, "type") and m.type == "human"),
             "(unknown)",
         )
         logger.info("[BaseAgent:%s] Query received: %s", prompt_key, last_user[:120])
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+        if isinstance(last_message, ToolMessage):
+            logger.info("[BaseAgent:%s] ToolMessage detected; emitting relay acknowledgement", prompt_key)
+            return {"messages": [AIMessage(content="Done — I’ve shared the tool result above.")]}
+
+        workflow = state.get("workflow") or {}
+        if (
+            isinstance(workflow, dict)
+            and workflow.get("stage")
+            and getattr(last_message, "type", None) == "human"
+        ):
+            domain = workflow.get("domain")
+            tool_name = "diet_tool" if domain == "diet" else "workout_tool" if domain == "workout" else None
+            if tool_name:
+                logger.info("[BaseAgent:%s] 🔁 Active workflow detected; force route → %s", prompt_key, tool_name)
+                forced_call = AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": tool_name,
+                            "args": {"query": last_user},
+                            "id": f"call_{uuid4().hex}",
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+                return {"messages": [forced_call]}
+
+        llm = ChatOpenAI(model="gpt-5-mini", temperature=0.7)
         llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
         response = llm_with_tools.invoke(
