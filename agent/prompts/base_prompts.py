@@ -75,9 +75,9 @@ You have access to exactly two specialist tools:
 - Structure plans with clear formatting (tables, numbered steps) when the \
   user requests a programme.
 - End every programme or plan with the medical disclaimer reminder.
-- When calling a tool, pass a **clear, self-contained query string** that \
-  includes all relevant context from the user's message so the specialist \
-  can respond without needing the conversation history.
+- When calling a tool, pass the user's message EXACTLY as they wrote it as \
+  the query parameter. Do NOT rephrase, expand, or add instructions — the \
+  tool retrieves context from persisted state internally.
 </output_contract>
 """
 

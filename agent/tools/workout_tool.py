@@ -3,74 +3,65 @@ agent/tools/workout_tool.py
 ────────────────────────────
 FITGEN.AI Workout Specialist Tool.
 
-Runs the user's query through all 5 prompt technique variants in parallel
-and returns a JSON-encoded dict keyed by technique name:
-  {"zero_shot": "...", "few_shot": "...", "cot": "...", ...}
-
-The Streamlit frontend renders each response in a separate tab.
+Implements a multi-turn intent-aware workflow for create / modify / delete
+operations with profile intake, SQL persistence, and calendar sync prompt.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Annotated, Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import InjectedState
 
-from agent.prompts.techniques import TECHNIQUE_KEYS
 from agent.prompts.workout_prompts import WORKOUT_PROMPTS
+from agent.tools.conversation_workflow import execute
 
 logger = logging.getLogger("fitgen.workout_tool")
 
 
-def _call_technique(technique: str, query: str) -> tuple[str, str]:
-    """Invoke one prompt variant and return (technique_key, response_text)."""
-    t0 = time.perf_counter()
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-    response = llm.invoke(
-        [SystemMessage(content=WORKOUT_PROMPTS[technique]), HumanMessage(content=query)]
-    )
-    elapsed = time.perf_counter() - t0
-    logger.info("[WorkoutTool] %-22s → %d chars  (%.2fs)", technique, len(response.content), elapsed)
-    return technique, response.content
+def _get_raw_user_query(state: dict[str, Any]) -> str:
+    """Extract the last HumanMessage content from graph state messages."""
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, HumanMessage):
+            return msg.content
+    return ""
 
 
 @tool
-def workout_tool(query: str) -> str:
-    """Expert workout and training specialist for FITGEN.AI.
+def workout_tool(query: str, state: Annotated[dict[str, Any], InjectedState]) -> str:
+    """Multi-turn workout agent with create/modify/delete workflow and SQL persistence.
 
-    Use this tool for ANY query related to:
-    - Exercise selection, technique, or form
-    - Workout plans, training programmes, or splits (PPL, Upper/Lower, Full Body, etc.)
-    - Sets, reps, rest periods, tempo, or progressive overload
-    - Cardio, HIIT, endurance, or sport-specific training
-    - Mobility, flexibility, stretching, or warm-up/cool-down
-    - Recovery from training, deload weeks, or overtraining
-    - Strength, hypertrophy, or athletic performance goals
+    Workflow:
+    1) Understand user intent (LLM): create / modify / delete
+    2) Collect or update profile data (height, weight, etc.)
+    3) Persist records by state_id in SQLite
+    4) Ask optional Google Calendar sync
 
-    Returns a JSON object with one response per prompt technique
-    (zero_shot, few_shot, cot, analogical, generate_knowledge).
+    IMPORTANT: The 'query' parameter must be the user's EXACT message, word-for-word.
+    Do NOT paraphrase, expand, or add instructions. Just pass the raw user text.
 
-    Args:
-        query: The user's workout or training question.
+    Returns JSON with assistant_message and state_updates.
     """
-    logger.info("[WorkoutTool] Starting 5 parallel technique calls for: %s", query[:80])
-    t_start = time.perf_counter()
-    results: dict[str, str] = {}
+    # Always use the raw user message from state, not the LLM's tool-call args.
+    # The base agent LLM may elaborate or rewrite the query in its tool call,
+    # which pollutes profile extraction and yes/no classification downstream.
+    raw_query = _get_raw_user_query(state)
+    effective_query = raw_query or query  # fallback to LLM arg only if state has no messages
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {
-            executor.submit(_call_technique, technique, query): technique
-            for technique in TECHNIQUE_KEYS
-        }
-        for future in as_completed(futures):
-            technique, response = future.result()
-            results[technique] = response
+    logger.info("[WorkoutTool] Multi-turn query: %s", effective_query[:120])
+    if raw_query != query:
+        logger.debug(
+            "[WorkoutTool] Overrode LLM tool arg (len=%d) with raw user message (len=%d)",
+            len(query),
+            len(raw_query),
+        )
 
-    ordered = {k: results[k] for k in TECHNIQUE_KEYS if k in results}
-    logger.info("[WorkoutTool] All 5 techniques done in %.2fs", time.perf_counter() - t_start)
-    return json.dumps(ordered)
+    return execute(
+        domain="workout",
+        query=effective_query,
+        state=state,
+        plan_system_prompt=WORKOUT_PROMPTS["cot"],
+    )

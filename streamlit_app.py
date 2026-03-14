@@ -16,7 +16,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from time import perf_counter
 
 import streamlit as st
 import streamlit.components.v1 as _components  # noqa: F401 — needed for st.components.v1.html
@@ -25,25 +28,62 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from agent import AgentState, create_graph
+from agent.persistence import get_context_state, get_latest_context_state_by_email, init_db
 from agent.prompts.base_prompts import BASE_PROMPTS
 from agent.prompts.techniques import TECHNIQUE_KEYS, TECHNIQUE_META
 
 
 # ── Log capture ───────────────────────────────────────────────────
-class _ListHandler(logging.Handler):
-    """Appends formatted log records to st.session_state.run_logs."""
+_LOG_BUFFER_MAX = int(os.getenv("FITGEN_LOG_BUFFER", "1000"))
+_LOG_BUFFER: deque[str] = deque(maxlen=_LOG_BUFFER_MAX)
+
+
+class _BufferHandler(logging.Handler):
+    """Thread-safe in-process log buffer for UI display."""
+
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            st.session_state.setdefault("run_logs", []).append(self.format(record))
+            _LOG_BUFFER.append(self.format(record))
         except Exception:  # noqa: BLE001
             pass
 
+
+def _configure_logging() -> None:
+    """Configure console + UI-buffer logging exactly once per process."""
+    level_name = os.getenv("FITGEN_LOG_LEVEL", "DEBUG").upper()
+    level = getattr(logging, level_name, logging.DEBUG)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    if not any(getattr(h, "_fitgen_console", False) for h in root.handlers):
+        console = logging.StreamHandler()
+        console._fitgen_console = True  # type: ignore[attr-defined]
+        console.setLevel(level)
+        console.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+            "%H:%M:%S",
+        ))
+        root.addHandler(console)
+
+    fitgen = logging.getLogger("fitgen")
+    fitgen.setLevel(level)
+    fitgen.propagate = True
+    if not any(isinstance(h, _BufferHandler) for h in fitgen.handlers):
+        buffer_handler = _BufferHandler()
+        buffer_handler.setLevel(level)
+        buffer_handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+            "%H:%M:%S",
+        ))
+        fitgen.addHandler(buffer_handler)
+
+
+_configure_logging()
+_ui_logger = logging.getLogger("fitgen.streamlit")
+
 _fitgen_logger = logging.getLogger("fitgen")
 _fitgen_logger.setLevel(logging.DEBUG)
-if not any(isinstance(h, _ListHandler) for h in _fitgen_logger.handlers):
-    _handler = _ListHandler()
-    _handler.setFormatter(logging.Formatter("%(asctime)s  %(name)s  %(message)s", "%H:%M:%S"))
-    _fitgen_logger.addHandler(_handler)
 
 # ── Page config ───────────────────────────────────────────────────
 st.set_page_config(
@@ -54,6 +94,7 @@ st.set_page_config(
 
 # ── Load env ──────────────────────────────────────────────────────
 load_dotenv()
+init_db()
 
 if not os.getenv("OPENAI_API_KEY"):
     st.error(
@@ -68,17 +109,23 @@ if "graph" not in st.session_state:
     st.session_state.graph = create_graph()
 
 if "agent_state" not in st.session_state:
-    st.session_state.agent_state: AgentState = {
+    user_email = os.getenv("FITGEN_USER_EMAIL", "").strip()
+    context_id = os.getenv("FITGEN_CONTEXT_ID", str(uuid.uuid4()))
+    restored = get_context_state(context_id) or get_latest_context_state_by_email(user_email) or {}
+    context_id = restored.get("context_id", context_id)
+    st.session_state.agent_state = {
         "messages": [],
-        "user_profile": {},
+        "user_profile": restored.get("user_profile", {}),
+        "user_email": user_email or restored.get("user_email", ""),
+        "context_id": context_id,
+        "state_id": context_id,
+        "workflow": restored.get("workflow", {}),
+        "calendar_sync_requested": restored.get("calendar_sync_requested", False),
     }
 
 # chat_history entries: {role, content, tool_used, technique_results, base_results}
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history: list[dict] = []
-
-if "run_logs" not in st.session_state:
-    st.session_state.run_logs: list[str] = []
+    st.session_state.chat_history = []
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -137,12 +184,14 @@ def _render_technique_tabs(results: dict[str, str]) -> None:
 
 def _run_base_comparison(query: str) -> dict[str, str]:
     """Run query through all 5 BASE_PROMPTS variants in parallel."""
+    _ui_logger.info("[BaseCompare] Starting comparison across %d techniques", len(TECHNIQUE_KEYS))
 
     def _call(tech: str) -> tuple[str, str]:
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
         resp = llm.invoke(
             [SystemMessage(content=BASE_PROMPTS[tech]), HumanMessage(content=query)]
         )
+        _ui_logger.debug("[BaseCompare] Completed technique=%s, chars=%d", tech, len(resp.content or ""))
         return tech, resp.content
 
     results: dict[str, str] = {}
@@ -151,6 +200,7 @@ def _run_base_comparison(query: str) -> dict[str, str]:
         for f in futures:
             tech, text = f.result()
             results[tech] = text
+    _ui_logger.info("[BaseCompare] Completed")
     return {k: results[k] for k in TECHNIQUE_KEYS if k in results}
 
 
@@ -198,10 +248,16 @@ with st.sidebar:
 
     st.divider()
     if st.button("🗑️ Clear conversation", use_container_width=True):
+        context_id = str(uuid.uuid4())
         st.session_state.chat_history = []
         st.session_state.agent_state = {
             "messages": [],
             "user_profile": {},
+            "user_email": st.session_state.agent_state.get("user_email", ""),
+            "context_id": context_id,
+            "state_id": context_id,
+            "workflow": {},
+            "calendar_sync_requested": False,
         }
         st.rerun()
 
@@ -209,11 +265,11 @@ with st.sidebar:
 
     # ── Live logs panel ───────────────────────────────────────────
     with st.expander("🪵 Backend Logs", expanded=False):
-        if st.session_state.get("run_logs"):
-            log_text = "\n".join(st.session_state.run_logs[-60:])  # last 60 lines
+        if _LOG_BUFFER:
+            log_text = "\n".join(list(_LOG_BUFFER)[-120:])  # last 120 lines
             st.code(log_text, language="text")
             if st.button("Clear logs", key="clear_logs"):
-                st.session_state.run_logs = []
+                _LOG_BUFFER.clear()
                 st.rerun()
         else:
             st.caption("No logs yet — send a message to see backend activity.")
@@ -244,6 +300,10 @@ for i, entry in enumerate(st.session_state.chat_history):
 prompt = st.chat_input("Ask me anything about fitness, workouts, or nutrition…")
 
 if prompt:
+    turn_id = uuid.uuid4().hex[:8]
+    turn_start = perf_counter()
+    _ui_logger.info("[Turn %s] Received user prompt: %s", turn_id, prompt)
+
     # ── Display user message ──────────────────────────────────────
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -265,44 +325,78 @@ if prompt:
         technique_results: dict = {}  # parsed JSON from ToolMessage
         base_results: dict = {}       # comparison across BASE_PROMPTS
         final_event: dict = {}
+        tool_direct_reply = False
 
         with st.spinner("Thinking…"):
+            event_count = 0
             for event in st.session_state.graph.stream(
                 st.session_state.agent_state, stream_mode="values"
             ):
                 final_event = event
+                event_count += 1
+                _ui_logger.debug(
+                    "[Turn %s] Stream event #%d keys=%s",
+                    turn_id,
+                    event_count,
+                    sorted(event.keys()),
+                )
 
                 if event.get("messages"):
-                    for msg in event["messages"]:
-                        # Detect @tool call intent
-                        if hasattr(msg, "tool_calls") and msg.tool_calls and not tool_used:
-                            tool_used = msg.tool_calls[0]["name"]
-                            badge_placeholder.markdown(_badge(tool_used), unsafe_allow_html=True)
+                    last_msg = event["messages"][-1]
 
-                        # Parse ToolMessage JSON → technique_results
-                        from langchain_core.messages import ToolMessage
-                        if isinstance(msg, ToolMessage) and msg.content:
-                            try:
-                                parsed = json.loads(msg.content)
-                                if isinstance(parsed, dict) and set(parsed.keys()) & set(TECHNIQUE_KEYS):
-                                    technique_results = parsed
-                                    with tabs_placeholder.container():
-                                        with st.expander("📊 Specialist Prompt Comparison", expanded=True):
-                                            _render_technique_tabs(technique_results)
-                            except (json.JSONDecodeError, TypeError):
-                                pass
+                    # Detect @tool call intent (latest message only)
+                    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls and not tool_used:
+                        tool_used = last_msg.tool_calls[0]["name"]
+                        badge_placeholder.markdown(_badge(tool_used), unsafe_allow_html=True)
+                        _ui_logger.info("[Turn %s] Routed to tool=%s", turn_id, tool_used)
+
+                    # Parse ToolMessage JSON → user-facing assistant message
+                    from langchain_core.messages import ToolMessage
+                    if isinstance(last_msg, ToolMessage) and last_msg.content:
+                        try:
+                            parsed = json.loads(last_msg.content)
+                            assistant_message = parsed.get("assistant_message")
+                            if assistant_message and assistant_message != response_content:
+                                response_content = assistant_message
+                                response_placeholder.markdown(response_content)
+                                tool_direct_reply = True
+                                _ui_logger.debug(
+                                    "[Turn %s] Tool assistant_message received (chars=%d)",
+                                    turn_id,
+                                    len(assistant_message),
+                                )
+                            if isinstance(parsed, dict) and set(parsed.keys()) & set(TECHNIQUE_KEYS):
+                                technique_results = parsed
+                                _ui_logger.debug("[Turn %s] Technique comparison payload detected", turn_id)
+                                with tabs_placeholder.container():
+                                    with st.expander("📊 Specialist Prompt Comparison", expanded=True):
+                                        _render_technique_tabs(technique_results)
+                        except (json.JSONDecodeError, TypeError):
+                            _ui_logger.warning("[Turn %s] ToolMessage JSON parse failed", turn_id)
 
                     # Final AIMessage text (not tool-call, not ToolMessage)
-                    last_msg = event["messages"][-1]
                     if (
                         hasattr(last_msg, "content")
                         and last_msg.content
                         and last_msg.content != response_content
                         and not getattr(last_msg, "tool_calls", None)
                         and not isinstance(last_msg, ToolMessage)
+                        and not tool_direct_reply
                     ):
                         response_content = last_msg.content
                         response_placeholder.markdown(response_content)
+                        _ui_logger.debug(
+                            "[Turn %s] Final AI direct reply received (chars=%d)",
+                            turn_id,
+                            len(response_content),
+                        )
+
+            _ui_logger.info(
+                "[Turn %s] Stream completed in %.2fs with %d events",
+                turn_id,
+                perf_counter() - turn_start,
+                event_count,
+            )
 
         # ── Optional: base agent technique comparison ─────────────
         if show_base and tool_used:
@@ -319,14 +413,39 @@ if prompt:
     # ── Sync agent state with final graph state ───────────────────
     if final_event and final_event.get("messages"):
         st.session_state.agent_state["messages"] = final_event["messages"]
+        if "user_profile" in final_event:
+            st.session_state.agent_state["user_profile"] = final_event["user_profile"]
+        if "user_email" in final_event:
+            st.session_state.agent_state["user_email"] = final_event["user_email"]
+        if "workflow" in final_event:
+            st.session_state.agent_state["workflow"] = final_event["workflow"]
+        if "context_id" in final_event:
+            st.session_state.agent_state["context_id"] = final_event["context_id"]
+        if "state_id" in final_event:
+            st.session_state.agent_state["state_id"] = final_event["state_id"]
+        if "calendar_sync_requested" in final_event:
+            st.session_state.agent_state["calendar_sync_requested"] = final_event["calendar_sync_requested"]
+
+        _ui_logger.info(
+            "[Turn %s] State sync complete: workflow=%s, profile_keys=%s, calendar_sync_requested=%s",
+            turn_id,
+            st.session_state.agent_state.get("workflow"),
+            sorted(st.session_state.agent_state.get("user_profile", {}).keys()),
+            st.session_state.agent_state.get("calendar_sync_requested"),
+        )
 
     # ── Persist to display history ────────────────────────────────
-    st.session_state.chat_history.append(
-        {
-            "role": "assistant",
-            "content": response_content,
-            "tool_used": tool_used or "",
-            "technique_results": technique_results,
-            "base_results": base_results,
-        }
-    )
+    assistant_entry = {
+        "role": "assistant",
+        "content": response_content,
+        "tool_used": tool_used or "",
+        "technique_results": technique_results,
+        "base_results": base_results,
+    }
+    if not (
+        st.session_state.chat_history
+        and st.session_state.chat_history[-1].get("role") == "assistant"
+        and st.session_state.chat_history[-1].get("content") == response_content
+    ):
+        st.session_state.chat_history.append(assistant_entry)
+    _ui_logger.info("[Turn %s] Assistant response persisted to history", turn_id)

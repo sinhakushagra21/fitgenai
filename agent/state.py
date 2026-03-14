@@ -34,3 +34,8 @@ class AgentState(TypedDict):
 
     messages: Annotated[list, add_messages]
     user_profile: dict[str, Any]
+    user_email: str
+    context_id: str
+    state_id: str
+    workflow: dict[str, Any]
+    calendar_sync_requested: bool
