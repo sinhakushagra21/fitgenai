@@ -103,6 +103,56 @@ if not os.getenv("OPENAI_API_KEY"):
     )
     st.stop()
 
+# ── Google Calendar OAuth callback handler ────────────────────────
+# When Google redirects back with ?code=..., intercept it here.
+
+_gcal_params = st.query_params
+if "code" in _gcal_params:
+    _gcal_code = _gcal_params.get("code", "")
+    # Clear query params immediately to prevent re-processing on rerun.
+    st.query_params.clear()
+
+    _gcal_logger = logging.getLogger("fitgen.calendar.streamlit")
+    _gcal_logger.info("[Calendar] Received OAuth code, exchanging for tokens…")
+
+    try:
+        from agent.tools.calendar_integration import (
+            exchange_code_for_tokens,
+            extract_calendar_events,
+            push_events_to_calendar,
+        )
+
+        tokens = exchange_code_for_tokens(_gcal_code)
+        _gcal_logger.info("[Calendar] Token exchange successful")
+
+        # Pull plan_text and domain from workflow state.
+        _wf = st.session_state.get("agent_state", {}).get("workflow", {})
+        _plan_text = _wf.get("plan_text", "")
+        _domain = _wf.get("domain", "diet")
+        _profile = st.session_state.get("agent_state", {}).get("user_profile", {})
+
+        if _plan_text:
+            events = extract_calendar_events(_plan_text, _domain, _profile)
+            if events:
+                created_count = push_events_to_calendar(events, tokens)
+                st.success(
+                    f"✅ **{created_count} events** synced to your Google Calendar! "
+                    f"Check your calendar for recurring {_domain} reminders starting tomorrow."
+                )
+                _gcal_logger.info("[Calendar] Pushed %d events successfully", created_count)
+
+                # Store tokens in session for potential future use.
+                st.session_state["google_calendar_tokens"] = tokens
+                st.session_state["calendar_events_pushed"] = True
+            else:
+                st.warning("⚠️ Connected to Google, but couldn't extract events from the plan.")
+        else:
+            st.warning("⚠️ Connected to Google, but no plan text found. Create a plan first, then sync.")
+
+    except Exception as e:
+        st.error(f"❌ Calendar sync failed: {e}")
+        _gcal_logger.error("[Calendar] OAuth or push failed: %s", e)
+
 # ── Session state init ────────────────────────────────────────────
 
 if "graph" not in st.session_state:
@@ -273,6 +323,30 @@ with st.sidebar:
                 st.rerun()
         else:
             st.caption("No logs yet — send a message to see backend activity.")
+
+    # ── Google Calendar sidebar ───────────────────────────────────
+    st.divider()
+    st.markdown("## 📅 Google Calendar")
+
+    _has_google_creds = bool(os.getenv("GOOGLE_CLIENT_ID")) and bool(os.getenv("GOOGLE_CLIENT_SECRET"))
+    _wf_state = st.session_state.get("agent_state", {}).get("workflow", {})
+    _calendar_stage = _wf_state.get("stage")
+    _already_pushed = st.session_state.get("calendar_events_pushed", False)
+
+    if _already_pushed:
+        st.success("✅ Calendar synced!")
+    elif _has_google_creds and _calendar_stage == "calendar_oauth_pending":
+        try:
+            from agent.tools.calendar_integration import get_authorization_url
+            _auth_url, _ = get_authorization_url()
+            st.link_button("📅 Connect Google Calendar", _auth_url, use_container_width=True)
+            st.caption("Sign in with Google to push your plan as calendar events.")
+        except Exception as _e:
+            st.caption(f"⚠️ Calendar setup error: {_e}")
+    elif not _has_google_creds:
+        st.caption("Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to .env to enable.")
+    else:
+        st.caption("Complete a plan and say 'yes' to calendar sync to enable.")
 
     st.caption("Built with LangGraph · LangChain · OpenAI · Streamlit")
 
