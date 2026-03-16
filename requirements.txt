@@ -7,6 +7,11 @@ python-dotenv>=1.0.0
 streamlit>=1.35.0
 typing-extensions>=4.9.0
 
+# Google Calendar integration
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-api-python-client>=2.100.0
+
 # Assignment 4 — Fine-tuning, RAG & Evaluation
 # FAISS wheels are typically unavailable on newer Python versions (e.g. 3.13+).
 # The retriever includes a NumPy fallback when FAISS is not installed.

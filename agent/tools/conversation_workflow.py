@@ -114,21 +114,132 @@ def _llm_json(system: str, user: str, retries: int = 2) -> dict[str, Any]:
     return {}
 
 
-def detect_intent(query: str) -> tuple[str, str]:
-    """Detect intent and return (intent, reason) from LLM JSON output."""
-    system = (
-        "Classify user intent into exactly one of: create, update, delete, get, other. "
-        "Also provide a short reason. "
-        "Return JSON only: {\"intent\":\"...\",\"reason\":\"...\"}."
-    )
+def classify_user_intent(
+    query: str,
+    *,
+    domain: str,
+    stage: str | None,
+    active_intent: str | None,
+    user_profile: dict[str, Any],
+    pending_question: str | None = None,
+) -> dict[str, Any]:
+    """Centralised LLM-based intent classifier.
+
+    Replaces the previous fragmented approach (detect_intent, parse_yes_no,
+    fallback_yes_no_from_text, looks_like_modify_request,
+    is_generic_modify_request, resolve_intent) with a single context-aware
+    LLM call.
+
+    Parameters
+    ----------
+    query : str
+        The raw user message for this turn.
+    domain : str
+        Current domain ("diet" or "workout").
+    stage : str | None
+        Current workflow stage (e.g., "confirm_profile", "calendar_sync",
+        "plan_feedback", "confirm_delete", "collect_profile", etc.).
+    active_intent : str | None
+        The intent already set in the workflow (e.g., "create", "update").
+    user_profile : dict
+        The user profile collected so far.
+    pending_question : str | None
+        The last question the system asked the user (gives context for
+        interpreting short replies like "yes", "83", "male").
+
+    Returns
+    -------
+    dict with keys:
+        intent : str
+            One of: create, update, delete, get, confirm, reject, other.
+        is_confirmation : bool
+            True when the user is affirming / agreeing.
+        has_modification_details : bool
+            True when the user supplies concrete changes (not just "modify it").
+        is_generic_request : bool
+            True for vague commands like "modify it" with no specifics.
+        reason : str
+            Short explanation of the classification.
+    """
+    profile_summary = json.dumps(user_profile, indent=2) if user_profile else "(empty)"
+
+    system = f"""\
+You are an intent classifier for FITGEN.AI, a fitness coaching chatbot.
+Your ONLY job is to decide what the user wants to do based on their message,
+the current conversation context, and the last question the system asked.
+
+Return ONLY valid JSON with these keys:
+  intent: exactly one of "create", "update", "delete", "get", "confirm", "reject", "other"
+  is_confirmation: true if the user is saying yes / agreeing / affirming ("yes", "sure", "looks good", "perfect", "correct")
+  has_modification_details: true if the user provides specific changes (e.g., "change protein to 150g", "remove dairy", "goal muscle gain")
+  is_generic_request: true if the user asks for a change but gives NO specifics (e.g., "modify it", "update", "change it")
+  reason: one-sentence explanation of your decision
+
+Classification rules:
+1. If the user says yes / agrees / affirms / gives positive feedback ("looks good",
+   "perfect", "awesome", "works for me", "correct", "confirmed") → intent="confirm", is_confirmation=true.
+2. If the user says no / declines / disagrees ("no", "nope", "nah", "not now",
+   "cancel", "incorrect") → intent="reject".
+3. If the user wants a new plan created ("create a plan", "make me a plan",
+   "build a workout") → intent="create".
+4. If the user wants to modify / change / update something with specifics
+   ("change my goal to muscle gain", "remove dairy", "add more protein") →
+   intent="update", has_modification_details=true.
+5. If the user wants to modify but gives NO specifics ("modify it", "update",
+   "change it", "please modify") → intent="update", is_generic_request=true,
+   has_modification_details=false.
+6. If the user wants to delete their plan → intent="delete".
+7. If the user wants to see / retrieve their plan → intent="get".
+8. If the user's message is a greeting, off-topic, or you can't determine
+   the intent → intent="other".
+
+Context-aware guidance:
+- Current domain: {domain}
+- Current workflow stage: {stage or '(none — fresh conversation)'}
+- Active intent in workflow: {active_intent or '(none)'}
+- Pending question asked by system: {pending_question or '(none)'}
+- User profile so far: {profile_summary}
+
+Use the pending question to understand what the user is responding to.
+For example, if the pending question is "Do you want Google Calendar sync?"
+and the user says "nah", that is intent="reject".
+If the pending question asks for profile details and the user provides them,
+that is NOT a confirmation — let the caller handle profile extraction.
+In that case, if the user is providing data mid-create, use intent="create".
+"""
+
     data = _llm_json(system, query)
+
+    # Normalise and validate
     intent = str(data.get("intent", "other")).strip().lower()
-    reason = str(data.get("reason", "")).strip()
     if intent == "modify":
         intent = "update"
-    if intent not in {"create", "update", "delete", "get", "other"}:
-        return "other", reason
-    return intent, reason
+    if intent == "yes":
+        intent = "confirm"
+    if intent == "no":
+        intent = "reject"
+    valid_intents = {"create", "update", "delete", "get", "confirm", "reject", "other"}
+    if intent not in valid_intents:
+        intent = "other"
+
+    result = {
+        "intent": intent,
+        "is_confirmation": bool(data.get("is_confirmation", intent == "confirm")),
+        "has_modification_details": bool(data.get("has_modification_details", False)),
+        "is_generic_request": bool(data.get("is_generic_request", False)),
+        "reason": str(data.get("reason", "")).strip(),
+    }
+
+    logger.info(
+        "[classify_user_intent] query=%r → intent=%s confirm=%s mod_details=%s generic=%s reason=%s",
+        query[:80],
+        result["intent"],
+        result["is_confirmation"],
+        result["has_modification_details"],
+        result["is_generic_request"],
+        result["reason"][:80] if result["reason"] else "(none)",
+    )
+    return result
 
 
 def extract_profile_updates(query: str, allowed_fields: list[str]) -> dict[str, Any]:
@@ -282,90 +393,6 @@ def extract_profile_updates_with_fallback(query: str, expected_fields: list[str]
     return updates
 
 
-def parse_yes_no(query: str) -> str:
-    # Always use LLM for yes/no/unknown classification.
-    # Why: caller requested intent understanding to be model-driven rather than heuristic.
-    system = "Return JSON only: {\"answer\":\"yes\"|\"no\"|\"unknown\"}."
-    data = _llm_json(system, query)
-    ans = str(data.get("answer", "unknown")).lower().strip()
-    if ans not in {"yes", "no", "unknown"}:
-        return "unknown"
-    return ans
-
-
-def fallback_yes_no_from_text(query: str, *, allow_positive_feedback: bool = False) -> str:
-    """Deterministic fallback when LLM yes/no classification returns unknown."""
-    normalized = re.sub(r"\s+", " ", query.lower()).strip(" .!?")
-
-    yes_tokens = {"yes", "y", "yeah", "yep", "yup", "ok", "okay", "sure", "confirm", "confirmed"}
-    no_tokens = {"no", "n", "nope", "nah", "cancel", "not now"}
-
-    if normalized in yes_tokens:
-        return "yes"
-    if normalized in no_tokens:
-        return "no"
-
-    if allow_positive_feedback:
-        positive_feedback = {
-            "perfect",
-            "perfect plan",
-            "looks good",
-            "looks great",
-            "great",
-            "awesome",
-            "all good",
-            "sounds good",
-            "works for me",
-            "done",
-        }
-        if normalized in positive_feedback:
-            return "yes"
-
-    return "unknown"
-
-
-def looks_like_modify_request(query: str) -> bool:
-    # Heuristic intent override for update-like language.
-    # Why: users often send direct modification requests while in confirmation stages.
-    lower = query.lower()
-    modify_markers = [
-        "modify",
-        "update",
-        "change",
-        "replace",
-        "remove",
-        "add",
-        "avoid",
-        "don't eat",
-        "dont eat",
-        "allergy",
-        "intoler",
-        "no seafood",
-        "no sea food",
-        "vegetarian",
-        "vegan",
-    ]
-    return any(marker in lower for marker in modify_markers)
-
-
-def is_generic_modify_request(query: str) -> bool:
-    # Detect vague modify commands that lack actionable details.
-    # Why: lets us ask a clarifying follow-up instead of regenerating a plan blindly.
-    cleaned = re.sub(r"\s+", " ", query.lower()).strip(" .!?")
-    generic_phrases = {
-        "modify",
-        "modify it",
-        "update",
-        "update it",
-        "change",
-        "change it",
-        "please update",
-        "please modify",
-        "please change",
-    }
-    return cleaned in generic_phrases
-
-
 def required_fields_for_domain(domain: str) -> list[str]:
     return list(DOMAIN_REQUIRED_FIELDS.get(domain, BASE_PROFILE_FIELDS))
 
@@ -473,20 +500,6 @@ def build_response(
     return json.dumps(payload, ensure_ascii=False)
 
 
-def resolve_intent(
-    detected_intent: str,
-    active_intent: str | None,
-    stage: str | None,
-    query: str,
-) -> str:
-    """Single source of truth for intent resolution across all stages."""
-    if detected_intent in {"get", "delete", "update"}:
-        return detected_intent
-    if stage in {"calendar_sync", "plan_feedback"} and looks_like_modify_request(query):
-        return "update"
-    return active_intent or detected_intent
-
-
 def handle_multi_turn(
     *,
     domain: str,
@@ -505,19 +518,44 @@ def handle_multi_turn(
     active_intent = workflow.get("intent")
     stage = workflow.get("stage")
 
-    # 3) Always classify current-turn intent, then decide if it should override workflow.
-    # Why: user may change objective mid-flow (e.g., "get my plan", "delete it").
-    detected_intent, intent_reason = detect_intent(query)
+    # Determine what question the system last asked (if any), for LLM context.
+    pending_question = workflow.get("pending_question")
+
+    # 2) Single centralised intent classification — replaces detect_intent,
+    #    parse_yes_no, fallback_yes_no, looks_like_modify, is_generic_modify,
+    #    and resolve_intent with one context-aware LLM call.
+    classification = classify_user_intent(
+        query,
+        domain=domain,
+        stage=stage,
+        active_intent=active_intent,
+        user_profile=profile,
+        pending_question=pending_question,
+    )
+
+    classified_intent = classification["intent"]
+    is_confirmation = classification["is_confirmation"]
+    has_modification_details = classification["has_modification_details"]
+    is_generic = classification["is_generic_request"]
+
     logger.info(
-        "[Workflow:%s] detected intent=%s reason=%s (active=%s, stage=%s)",
+        "[Workflow:%s] classified intent=%s (active=%s, stage=%s)",
         domain,
-        detected_intent,
-        intent_reason or "(none)",
+        classified_intent,
         active_intent,
         stage,
     )
 
-    intent = resolve_intent(detected_intent, active_intent, stage, query)
+    # 3) Resolve effective intent: CRUD intents always take priority;
+    #    confirm/reject are stage-local; otherwise keep active_intent.
+    if classified_intent in {"get", "delete", "update", "create"}:
+        intent = classified_intent
+    elif classified_intent in {"confirm", "reject"}:
+        # confirm/reject are handled inline by each stage below;
+        # keep active_intent so we stay in the current flow.
+        intent = active_intent or "other"
+    else:
+        intent = active_intent or classified_intent
 
     if intent != active_intent and active_intent is not None:
         stage = None
@@ -525,56 +563,74 @@ def handle_multi_turn(
 
     if stage == "calendar_sync":
         stage_intent = workflow.get("intent") or active_intent
-        if stage_intent is not None and intent != stage_intent:
-            logger.info("[Workflow:%s] calendar_sync interrupted by resolved intent=%s", domain, intent)
+        # If user switches to a different CRUD intent, interrupt calendar sync.
+        if classified_intent in {"get", "delete", "update", "create"} and classified_intent != stage_intent:
+            logger.info("[Workflow:%s] calendar_sync interrupted by intent=%s", domain, classified_intent)
             workflow = append_completed_step(
                 workflow,
-                {"intent": intent, "domain": domain},
+                {"intent": classified_intent, "domain": domain},
                 "calendar_interrupted_by_intent",
             )
             stage = None
             workflow.pop("stage", None)
         else:
-            answer = parse_yes_no(query)
-            if answer == "unknown":
-                answer = fallback_yes_no_from_text(query, allow_positive_feedback=False)
+            if is_confirmation:
+                # Generate Google OAuth URL and store plan text for the push stage.
+                try:
+                    from agent.tools.calendar_integration import get_authorization_url
+                    auth_url, oauth_state = get_authorization_url()
+                except Exception as e:
+                    logger.warning("[Workflow:%s] Calendar OAuth setup failed: %s", domain, e)
+                    auth_url = None
+                    oauth_state = None
 
-            if answer == "unknown":
-                workflow = append_completed_step(
-                    workflow,
-                    {"intent": workflow.get("intent", "create"), "stage": "calendar_sync", "domain": domain},
-                    "calendar_prompted",
-                )
-                return build_response(
-                    assistant_message="Please reply yes or no: do you want Google Calendar sync?",
-                    state_id=state_id,
-                    user_email=user_email,
-                    workflow=workflow,
-                    user_profile=profile,
-                    state_manager=state_manager,
-                )
+                if auth_url:
+                    update_calendar_sync(state_id, True)
+                    # Store plan_text and oauth_state so the Streamlit callback can push events.
+                    plan_text = workflow.get("plan_text", "")
+                    workflow = append_completed_step(
+                        workflow,
+                        {"stage": "calendar_oauth_pending", "domain": domain,
+                         "plan_text": plan_text, "oauth_state": oauth_state},
+                        "calendar_oauth_started",
+                    )
+                    return build_response(
+                        assistant_message=(
+                            "🔗 **Ready to connect Google Calendar!**\n\n"
+                            "Click the **\"📅 Connect Google Calendar\"** button in the sidebar "
+                            "to sign in with Google and sync your plan.\n\n"
+                            f"Or open this link directly: [Authorize FITGEN.AI]({auth_url})"
+                        ),
+                        state_id=state_id,
+                        user_email=user_email,
+                        workflow=workflow,
+                        user_profile=profile,
+                        state_manager=state_manager,
+                        extra={"calendar_sync_requested": True, "calendar_auth_url": auth_url},
+                    )
+                else:
+                    # Fallback if Google credentials not configured.
+                    update_calendar_sync(state_id, True)
+                    workflow = append_completed_step(workflow, {}, "calendar_sync_enabled_no_oauth")
+                    return build_response(
+                        assistant_message=(
+                            "I marked your plan for Google Calendar sync, but the Google Calendar "
+                            "integration is not configured yet. Please add GOOGLE_CLIENT_ID and "
+                            "GOOGLE_CLIENT_SECRET to your .env file."
+                        ),
+                        state_id=state_id,
+                        user_email=user_email,
+                        workflow=workflow,
+                        user_profile=profile,
+                        state_manager=state_manager,
+                        extra={"calendar_sync_requested": True},
+                    )
 
-            if answer == "yes":
-                update_calendar_sync(state_id, True)
-                workflow = append_completed_step(workflow, {}, "calendar_sync_enabled")
-                return build_response(
-                    assistant_message=(
-                        "Great — I marked your plan for Google Calendar sync. "
-                        "Next step: connect your Google account in the integration settings."
-                    ),
-                    state_id=state_id,
-                    user_email=user_email,
-                    workflow=workflow,
-                    user_profile=profile,
-                    state_manager=state_manager,
-                    extra={"calendar_sync_requested": True},
-                )
-
-            if answer == "no":
+            if classified_intent == "reject":
                 update_calendar_sync(state_id, False)
                 workflow = append_completed_step(workflow, {}, "calendar_sync_skipped")
                 return build_response(
-                    assistant_message="No problem — I won’t sync it to Google Calendar.",
+                    assistant_message="No problem — I won't sync it to Google Calendar.",
                     state_id=state_id,
                     user_email=user_email,
                     workflow=workflow,
@@ -583,57 +639,74 @@ def handle_multi_turn(
                     extra={"calendar_sync_requested": False},
                 )
 
-    if stage == "plan_feedback":
-        stage_intent = workflow.get("intent") or active_intent
-        if stage_intent is not None and intent != stage_intent:
-            logger.info("[Workflow:%s] plan_feedback interrupted by resolved intent=%s", domain, intent)
+            # Could not determine yes/no — re-ask.
             workflow = append_completed_step(
                 workflow,
-                {"intent": intent, "domain": domain},
+                {"intent": workflow.get("intent", "create"), "stage": "calendar_sync", "domain": domain,
+                 "pending_question": "Do you want Google Calendar sync? (yes/no)"},
+                "calendar_prompted",
+            )
+            return build_response(
+                assistant_message="Please reply yes or no: do you want Google Calendar sync?",
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+
+    if stage == "plan_feedback":
+        stage_intent = workflow.get("intent") or active_intent
+        # If user switches to a different CRUD intent, interrupt plan feedback.
+        if classified_intent in {"get", "delete"} and classified_intent != stage_intent:
+            logger.info("[Workflow:%s] plan_feedback interrupted by intent=%s", domain, classified_intent)
+            workflow = append_completed_step(
+                workflow,
+                {"intent": classified_intent, "domain": domain},
                 "plan_feedback_interrupted_by_intent",
             )
             stage = None
             workflow.pop("stage", None)
-        else:
-            answer = parse_yes_no(query)
-            if answer == "unknown":
-                answer = fallback_yes_no_from_text(query, allow_positive_feedback=True)
-            if answer == "yes":
-                workflow = append_completed_step(
-                    workflow,
-                    {"intent": workflow.get("intent", "create"), "stage": "calendar_sync", "domain": domain},
-                    "plan_confirmed",
-                )
-                return build_response(
-                    assistant_message="Great — glad this works for you. Would you like me to sync this to Google Calendar? (yes/no)",
-                    state_id=state_id,
-                    user_email=user_email,
-                    workflow=workflow,
-                    user_profile=profile,
-                    state_manager=state_manager,
-                )
-
-            if answer == "no":
-                workflow = append_completed_step(
-                    workflow,
-                    {"intent": "update", "stage": "await_update_instructions", "domain": domain},
-                    "plan_rejected",
-                )
-                return build_response(
-                    assistant_message=(
-                        f"No problem — tell me what you'd like to change in your {domain} plan "
-                        "(e.g., foods to avoid, calories, goal, schedule)."
-                    ),
-                    state_id=state_id,
-                    user_email=user_email,
-                    workflow=workflow,
-                    user_profile=profile,
-                    state_manager=state_manager,
-                )
-
+        elif is_confirmation:
             workflow = append_completed_step(
                 workflow,
-                {"intent": workflow.get("intent", "create"), "stage": "plan_feedback", "domain": domain},
+                {"intent": workflow.get("intent", "create"), "stage": "calendar_sync", "domain": domain,
+                 "pending_question": "Would you like me to sync this to Google Calendar? (yes/no)"},
+                "plan_confirmed",
+            )
+            return build_response(
+                assistant_message="Great — glad this works for you. Would you like me to sync this to Google Calendar? (yes/no)",
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+        elif classified_intent == "reject" or classified_intent == "update":
+            # User either rejected the plan or wants to modify it.
+            workflow = append_completed_step(
+                workflow,
+                {"intent": "update", "stage": "await_update_instructions", "domain": domain},
+                "plan_rejected",
+            )
+            msg = (
+                f"No problem — tell me what you'd like to change in your {domain} plan "
+                "(e.g., foods to avoid, calories, goal, schedule)."
+            )
+            return build_response(
+                assistant_message=msg,
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+        else:
+            # Could not determine — re-ask.
+            workflow = append_completed_step(
+                workflow,
+                {"intent": workflow.get("intent", "create"), "stage": "plan_feedback", "domain": domain,
+                 "pending_question": "Do you want to keep this plan as-is? Reply yes to keep it, or tell me what you want changed."},
                 "plan_feedback_prompted",
             )
             return build_response(
@@ -722,6 +795,7 @@ def handle_multi_turn(
             )
 
         if stage != "confirm_profile":
+            confirm_msg = build_profile_confirmation(profile, required_fields)
             workflow = append_completed_step(
                 workflow,
                 {
@@ -729,11 +803,12 @@ def handle_multi_turn(
                     "stage": "confirm_profile",
                     "domain": domain,
                     "required_fields": required_fields,
+                    "pending_question": confirm_msg,
                 },
                 "profile_mapped",
             )
             return build_response(
-                assistant_message=build_profile_confirmation(profile, required_fields),
+                assistant_message=confirm_msg,
                 state_id=state_id,
                 user_email=user_email,
                 workflow=workflow,
@@ -741,35 +816,11 @@ def handle_multi_turn(
                 state_manager=state_manager,
             )
 
-        answer = parse_yes_no(query)
-        if answer == "unknown":
-            normalized = re.sub(r"\s+", " ", query.lower()).strip(" .!?")
-            if normalized in {"yes", "y", "yeah", "yep", "correct", "confirm"}:
-                answer = "yes"
-            elif normalized in {"no", "n", "nope", "nah", "incorrect"}:
-                answer = "no"
-
-        if answer == "unknown":
-            workflow = append_completed_step(
-                workflow,
-                {
-                    "intent": "create",
-                    "stage": "confirm_profile",
-                    "domain": domain,
-                    "required_fields": required_fields,
-                },
-                "profile_confirmation_reprompted",
-            )
-            return build_response(
-                assistant_message="Please reply yes to confirm the mapped details, or share corrections.",
-                state_id=state_id,
-                user_email=user_email,
-                workflow=workflow,
-                user_profile=profile,
-                state_manager=state_manager,
-            )
-
-        if answer != "yes":
+        # Stage IS confirm_profile — use the centralised classification.
+        if is_confirmation:
+            pass  # Fall through to plan generation below.
+        elif classified_intent == "reject" or has_modification_details:
+            # User rejected or provided corrections.
             corrections = extract_profile_updates_with_fallback(
                 query,
                 missing_profile_fields(profile, required_fields),
@@ -794,19 +845,43 @@ def handle_multi_turn(
                 user_profile=profile,
                 state_manager=state_manager,
             )
+        else:
+            # Could not determine — re-ask.
+            workflow = append_completed_step(
+                workflow,
+                {
+                    "intent": "create",
+                    "stage": "confirm_profile",
+                    "domain": domain,
+                    "required_fields": required_fields,
+                    "pending_question": "Please reply yes to confirm the mapped details, or share corrections.",
+                },
+                "profile_confirmation_reprompted",
+            )
+            return build_response(
+                assistant_message="Please reply yes to confirm the mapped details, or share corrections.",
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
 
         plan = generate_plan(domain, profile, query, plan_system_prompt)
         upsert_record(state_id=state_id, domain=domain, profile=profile, plan_text=plan, calendar_sync=False)
+        feedback_msg = (
+            f"Great — your {domain} plan is ready.\n\n{plan}\n\n"
+            "Please review it and tell me if you want any changes."
+        )
         workflow = append_completed_step(
             workflow,
-            {"intent": "create", "stage": "plan_feedback", "domain": domain},
+            {"intent": "create", "stage": "plan_feedback", "domain": domain,
+             "plan_text": plan,
+             "pending_question": "Please review the plan and tell me if you want any changes."},
             "plan_generated",
         )
         return build_response(
-            assistant_message=(
-                f"Great — your {domain} plan is ready.\n\n{plan}\n\n"
-                "Please review it and tell me if you want any changes."
-            ),
+            assistant_message=feedback_msg,
             state_id=state_id,
             user_email=user_email,
             workflow=workflow,
@@ -848,7 +923,7 @@ def handle_multi_turn(
 
         # Generic modify requests without concrete details should trigger clarification.
         # Why: prevents low-quality regenerations from underspecified instructions.
-        if not updates and is_generic_modify_request(query):
+        if not updates and is_generic:
             workflow = append_completed_step(
                 workflow,
                 {"intent": "update", "stage": "await_update_instructions", "domain": domain},
@@ -868,16 +943,19 @@ def handle_multi_turn(
 
         plan = generate_plan(domain, merged_profile, query, plan_system_prompt)
         upsert_record(state_id=state_id, domain=domain, profile=merged_profile, plan_text=plan, calendar_sync=record.get("calendar_sync", False))
+        update_feedback_msg = (
+            f"Done — I updated your {domain} plan.\n\n{plan}\n\n"
+            "Please review the update and tell me if you want any more changes."
+        )
         workflow = append_completed_step(
             workflow,
-            {"intent": "update", "stage": "plan_feedback", "domain": domain},
+            {"intent": "update", "stage": "plan_feedback", "domain": domain,
+             "plan_text": plan,
+             "pending_question": "Please review the update and tell me if you want any more changes."},
             "plan_updated",
         )
         return build_response(
-            assistant_message=(
-                f"Done — I updated your {domain} plan.\n\n{plan}\n\n"
-                "Please review the update and tell me if you want any more changes."
-            ),
+            assistant_message=update_feedback_msg,
             state_id=state_id,
             user_email=user_email,
             workflow=workflow,
@@ -890,7 +968,8 @@ def handle_multi_turn(
         if stage != "confirm_delete":
             workflow = append_completed_step(
                 workflow,
-                {"intent": "delete", "stage": "confirm_delete", "domain": domain},
+                {"intent": "delete", "stage": "confirm_delete", "domain": domain,
+                 "pending_question": "Please confirm: do you want me to delete your stored plan and profile? (yes/no)"},
                 "delete_confirmation_requested",
             )
             return build_response(
@@ -902,8 +981,8 @@ def handle_multi_turn(
                 state_manager=state_manager,
             )
 
-        answer = parse_yes_no(query)
-        if answer == "yes":
+        # Stage IS confirm_delete — use the centralised classification.
+        if is_confirmation:
             deleted = delete_record(state_id)
             workflow = append_completed_step(workflow, {}, "delete_completed")
             return build_response(
@@ -917,7 +996,7 @@ def handle_multi_turn(
                 state_manager=state_manager,
             )
 
-        if answer == "no":
+        if classified_intent == "reject":
             workflow = append_completed_step(workflow, {}, "delete_canceled")
             return build_response(
                 assistant_message="Deletion canceled. Your record is unchanged.",
@@ -928,9 +1007,11 @@ def handle_multi_turn(
                 state_manager=state_manager,
             )
 
+        # Could not determine — re-ask.
         workflow = append_completed_step(
             workflow,
-            {"intent": "delete", "stage": "confirm_delete", "domain": domain},
+            {"intent": "delete", "stage": "confirm_delete", "domain": domain,
+             "pending_question": "I need a clear yes or no to proceed with deletion."},
             "delete_confirmation_reprompted",
         )
         return build_response(
