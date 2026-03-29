@@ -1,0 +1,62 @@
+# Azure Prompt Flow: RAG-Augmented Generation
+# ─────────────────────────────────────────────
+# Retrieves relevant fitness knowledge, augments the prompt,
+# and generates a grounded response.
+#
+# DAG: input → retrieve_context → augment_prompt → generate → output
+
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+
+inputs:
+  query:
+    type: string
+    description: "User's fitness question"
+  top_k:
+    type: int
+    default: 3
+    description: "Number of knowledge documents to retrieve"
+
+outputs:
+  response:
+    type: string
+    reference: ${generate_response.output}
+  sources:
+    type: string
+    reference: ${retrieve_context.output.sources}
+  retrieval_scores:
+    type: string
+    reference: ${retrieve_context.output.scores}
+
+nodes:
+  - name: retrieve_context
+    type: python
+    source:
+      type: code
+      path: retrieve_context.py
+    inputs:
+      query: ${inputs.query}
+      top_k: ${inputs.top_k}
+
+  - name: augment_prompt
+    type: python
+    source:
+      type: code
+      path: augment_prompt.py
+    inputs:
+      query: ${inputs.query}
+      context: ${retrieve_context.output.context}
+
+  - name: generate_response
+    type: llm
+    source:
+      type: code
+      path: generate_response.py
+    inputs:
+      augmented_prompt: ${augment_prompt.output}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+environment:
+  python_requirements_txt: requirements.txt

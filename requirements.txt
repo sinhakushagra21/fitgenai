@@ -21,3 +21,8 @@ pandas>=2.0.0
 numpy>=1.24.0
 scikit-learn>=1.3.0
 
+# Assignment 5 — Flow Engineering & Azure Prompt Flow
+promptflow>=1.10.0
+promptflow-tools>=1.4.0
+pyyaml>=6.0
+

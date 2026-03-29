@@ -1,0 +1,69 @@
+# Azure Prompt Flow: Self-Refine (Meta-Prompting)
+# ─────────────────────────────────────────────────
+# Three-step meta-prompting chain:
+#   1. Generate initial response
+#   2. Self-critique with scoring
+#   3. Produce refined response
+#
+# DAG: input → initial_generate → self_critique → refine → output
+
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+
+inputs:
+  query:
+    type: string
+    description: "User's fitness question"
+
+outputs:
+  refined_response:
+    type: string
+    reference: ${refine_response.output}
+  initial_response:
+    type: string
+    reference: ${initial_generate.output}
+  critique:
+    type: string
+    reference: ${self_critique.output}
+
+nodes:
+  - name: initial_generate
+    type: llm
+    source:
+      type: code
+      path: initial_generate.py
+    inputs:
+      query: ${inputs.query}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+  - name: self_critique
+    type: llm
+    source:
+      type: code
+      path: self_critique.py
+    inputs:
+      query: ${inputs.query}
+      response: ${initial_generate.output}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+  - name: refine_response
+    type: llm
+    source:
+      type: code
+      path: refine_response.py
+    inputs:
+      query: ${inputs.query}
+      initial_response: ${initial_generate.output}
+      critique: ${self_critique.output}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+environment:
+  python_requirements_txt: requirements.txt

@@ -1,0 +1,71 @@
+# Azure Prompt Flow: Evaluation Flow
+# ────────────────────────────────────
+# Evaluates model responses against ground truth using multiple metrics.
+#
+# DAG: input → compute_metrics → aggregate → output
+
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+
+inputs:
+  query:
+    type: string
+  response:
+    type: string
+  expected_keywords:
+    type: list
+  ground_truth_tool:
+    type: string
+
+outputs:
+  evaluation_result:
+    type: string
+    reference: ${aggregate_scores.output}
+
+nodes:
+  - name: keyword_match
+    type: python
+    source:
+      type: code
+      path: keyword_match.py
+    inputs:
+      response: ${inputs.response}
+      expected_keywords: ${inputs.expected_keywords}
+
+  - name: coherence_judge
+    type: llm
+    source:
+      type: code
+      path: coherence_judge.py
+    inputs:
+      query: ${inputs.query}
+      response: ${inputs.response}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+  - name: groundedness_judge
+    type: llm
+    source:
+      type: code
+      path: groundedness_judge.py
+    inputs:
+      query: ${inputs.query}
+      response: ${inputs.response}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+  - name: aggregate_scores
+    type: python
+    source:
+      type: code
+      path: aggregate_scores.py
+    inputs:
+      keyword_score: ${keyword_match.output}
+      coherence_score: ${coherence_judge.output}
+      groundedness_score: ${groundedness_judge.output}
+
+environment:
+  python_requirements_txt: requirements.txt

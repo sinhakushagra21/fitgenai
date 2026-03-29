@@ -1,0 +1,76 @@
+# Azure Prompt Flow: Classify and Route
+# ─────────────────────────────────────
+# This flow classifies user intent and routes to the appropriate
+# specialist tool (workout_tool or diet_tool).
+#
+# DAG: input → classify_intent → route_decision → specialist_call → output
+
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+
+inputs:
+  query:
+    type: string
+    description: "User's fitness-related question or request"
+  prompting_technique:
+    type: string
+    default: "zero_shot"
+    description: "Which prompting technique to use (zero_shot, few_shot, cot, analogical, generate_knowledge, decomposition)"
+
+outputs:
+  response:
+    type: string
+    reference: ${synthesize_response.output}
+  tool_used:
+    type: string
+    reference: ${classify_intent.output.tool}
+  reasoning:
+    type: string
+    reference: ${classify_intent.output.reasoning}
+
+nodes:
+  - name: classify_intent
+    type: llm
+    source:
+      type: code
+      path: classify_intent.py
+    inputs:
+      query: ${inputs.query}
+      technique: ${inputs.prompting_technique}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+  - name: route_decision
+    type: python
+    source:
+      type: code
+      path: route_decision.py
+    inputs:
+      classification: ${classify_intent.output}
+
+  - name: specialist_call
+    type: llm
+    source:
+      type: code
+      path: specialist_call.py
+    inputs:
+      query: ${inputs.query}
+      tool: ${route_decision.output.tool}
+      specialist_prompt: ${route_decision.output.specialist_prompt}
+    connection: open_ai_connection
+    api: chat
+    provider: AzureOpenAI
+    model: gpt-4o-mini
+
+  - name: synthesize_response
+    type: python
+    source:
+      type: code
+      path: synthesize_response.py
+    inputs:
+      specialist_output: ${specialist_call.output}
+      tool_used: ${route_decision.output.tool}
+
+environment:
+  python_requirements_txt: requirements.txt
