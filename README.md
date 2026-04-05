@@ -385,49 +385,6 @@ Prompt engineering is not a one-shot activity — it is an iterative design proc
 
 ---
 
-## Flow Engineering (Assignment 5)
-
-FITGEN.AI applies **flow engineering** principles using **LangChain** and **Azure Prompt Flow** to refine, automate, and optimize complex prompts through iterative experimentation.
-
-### Chain Variants
-
-Four LangChain `Runnable` chain variants implement different flow engineering patterns:
-
-| Variant | Pattern | LLM Calls | Best For |
-|---------|---------|-----------|----------|
-| **A — Vanilla** | Direct prompt → response | 1 | Simple queries |
-| **B — Helper Prompt** | Knowledge gen → enriched response | 2 | Evidence-based answers |
-| **C — Decompose+Route** | Break → classify → specialists → merge | 3-5 | Multi-domain queries |
-| **D — Self-Refine** | Generate → critique → refine | 3 | Highest quality output |
-
-### Azure Prompt Flow
-
-Four YAML flow definitions for Azure AI Studio:
-- `classify_and_route.yaml` — intent classification → tool routing
-- `generate_with_rag.yaml` — RAG-augmented generation
-- `self_refine.yaml` — meta-prompting self-improvement
-- `evaluation.yaml` — automated evaluation pipeline
-
-### How to Run
-
-```bash
-# Baseline analysis
-python -m flow_engineering.baseline_analysis
-
-# Run all chain variants
-python -m flow_engineering.prompt_flow
-
-# Iterative improvement tracking
-python -m flow_engineering.iteration_tracker
-
-# Full evaluation
-python -m flow_engineering.flow_evaluator
-
-# Azure Prompt Flow setup
-python -m flow_engineering.azure_promptflow
-```
-
-See [Assignment 5 Report](docs/Assignment_5_Report.md) for full documentation.
 
 ---
 

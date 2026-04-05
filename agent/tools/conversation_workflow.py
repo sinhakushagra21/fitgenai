@@ -24,7 +24,9 @@ from agent.persistence import (
 )
 
 logger = logging.getLogger("fitgen.workflow")
-_LLM_MODEL = os.getenv("FITGEN_LLM_MODEL", "gpt-4o-mini")
+from agent.config import DEFAULT_MODEL
+
+_LLM_MODEL = DEFAULT_MODEL
 
 BASE_PROFILE_FIELDS = [
     "name",

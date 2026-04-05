@@ -2,7 +2,7 @@
 """
 fine_tuning/compare_models.py
 ──────────────────────────────
-Compare baseline (gpt-5-mini) vs fine-tuned model on the test set.
+Compare baseline (gpt-4o-mini) vs fine-tuned model on the test set.
 
 Metrics:
   • Routing accuracy  — tool selection correctness
@@ -48,7 +48,9 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 TEST_FILE = PROJECT_ROOT / "data" / "test.jsonl"
 MODEL_ID_FILE = FT_DIR / "data" / "finetuned_model_id.txt"
 
-BASELINE_MODEL = "gpt-5-mini"
+from agent.config import DEFAULT_MODEL
+
+BASELINE_MODEL = DEFAULT_MODEL
 
 SYSTEM_PROMPT = BASE_ZERO_SHOT + """
 

@@ -155,11 +155,15 @@ def make_base_agent(prompt_key: str = "zero_shot"):
                 )
                 return {"messages": [forced_call]}
 
-        llm = ChatOpenAI(model="gpt-5-mini", temperature=0.7)
+        from agent.config import DEFAULT_MODEL
+        from agent.llm_utils import safe_llm_call
+
+        llm = ChatOpenAI(model=DEFAULT_MODEL, temperature=0.7)
         llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
-        response = llm_with_tools.invoke(
-            [SystemMessage(content=system_prompt)] + state["messages"]
+        response = safe_llm_call(
+            llm_with_tools,
+            [SystemMessage(content=system_prompt)] + state["messages"],
         )
 
         if getattr(response, "tool_calls", None):

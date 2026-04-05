@@ -13,14 +13,20 @@ Run with:
 
 from __future__ import annotations
 
+import os
+# Fix protobuf C++ extension issue on Anaconda (must be set before any protobuf import)
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+
 import json
 import logging
-import os
 import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import streamlit as st
 import streamlit.components.v1 as _components  # noqa: F401 — needed for st.components.v1.html
 from dotenv import load_dotenv
@@ -28,6 +34,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from agent import AgentState, create_graph
+from agent.feedback import get_average_rating, save_feedback
 from agent.persistence import get_context_state, get_latest_context_state_by_email, init_db
 from agent.prompts.base_prompts import BASE_PROMPTS
 from agent.prompts.techniques import TECHNIQUE_KEYS, TECHNIQUE_META
@@ -313,6 +320,44 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # ── Workflow progress indicator ──────────────────────────────
+    st.markdown("## 📊 Session Status")
+    _workflow = st.session_state.agent_state.get("workflow", {})
+    _stage = _workflow.get("stage", "")
+    _domain = _workflow.get("domain", "")
+    _completed = _workflow.get("completed_steps", [])
+
+    _STAGE_PROGRESS = {
+        "": ("Ready", 0.0),
+        "collect_profile": ("Collecting Profile", 0.25),
+        "confirm_profile": ("Confirming Profile", 0.50),
+        "plan_feedback": ("Reviewing Plan", 0.75),
+        "calendar_sync": ("Calendar Sync", 0.90),
+    }
+    if any(s in _completed for s in ("plan_confirmed", "calendar_sync_yes", "calendar_sync_no")):
+        _stage_label, _progress = "Complete", 1.0
+    else:
+        _stage_label, _progress = _STAGE_PROGRESS.get(_stage, ("In Progress", 0.5))
+
+    st.progress(_progress, text=_stage_label)
+    if _domain:
+        st.caption(f"Domain: **{_domain.title()}**")
+
+    # ── Feedback stats ────────────────────────────────────────────
+    _ctx_id = st.session_state.agent_state.get("context_id", "")
+    _avg_rating = get_average_rating(_ctx_id) if _ctx_id else None
+    if _avg_rating is not None:
+        st.metric("Avg Session Rating", f"{_avg_rating}/5")
+
+    # ── Response time tracking ────────────────────────────────────
+    if "response_times" not in st.session_state:
+        st.session_state.response_times = []
+    if st.session_state.response_times:
+        avg_time = sum(st.session_state.response_times) / len(st.session_state.response_times)
+        st.metric("Avg Response Time", f"{avg_time:.1f}s")
+
+    st.markdown("---")
+
     # ── Live logs panel ───────────────────────────────────────────
     with st.expander("🪵 Backend Logs", expanded=False):
         if _LOG_BUFFER:
@@ -401,7 +446,8 @@ if prompt:
         final_event: dict = {}
         tool_direct_reply = False
 
-        with st.spinner("Thinking…"):
+        try:
+          with st.status("Analyzing your request...", expanded=False) as status:
             event_count = 0
             for event in st.session_state.graph.stream(
                 st.session_state.agent_state, stream_mode="values"
@@ -421,12 +467,15 @@ if prompt:
                     # Detect @tool call intent (latest message only)
                     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls and not tool_used:
                         tool_used = last_msg.tool_calls[0]["name"]
+                        tool_label, _ = TOOL_LABELS.get(tool_used, ("Specialist", "#333"))
+                        status.update(label=f"Routing to {tool_label}...")
                         badge_placeholder.markdown(_badge(tool_used), unsafe_allow_html=True)
                         _ui_logger.info("[Turn %s] Routed to tool=%s", turn_id, tool_used)
 
                     # Parse ToolMessage JSON → user-facing assistant message
                     from langchain_core.messages import ToolMessage
                     if isinstance(last_msg, ToolMessage) and last_msg.content:
+                        status.update(label="Generating your response...")
                         try:
                             parsed = json.loads(last_msg.content)
                             assistant_message = parsed.get("assistant_message")
@@ -465,12 +514,25 @@ if prompt:
                             len(response_content),
                         )
 
+            elapsed = perf_counter() - turn_start
+            status.update(label="Done", state="complete")
             _ui_logger.info(
                 "[Turn %s] Stream completed in %.2fs with %d events",
                 turn_id,
-                perf_counter() - turn_start,
+                elapsed,
                 event_count,
             )
+        except Exception as e:
+            elapsed = perf_counter() - turn_start
+            _ui_logger.error("[Turn %s] Error: %s", turn_id, e)
+            import openai
+            if isinstance(e, openai.RateLimitError):
+                st.warning("Rate limit reached. Please wait a moment and try again.")
+            elif isinstance(e, openai.APITimeoutError):
+                st.error("Request timed out. Please try again.")
+            else:
+                st.error(f"An error occurred: {e}")
+            response_content = ""
 
         # ── Optional: base agent technique comparison ─────────────
         if show_base and tool_used:
@@ -483,6 +545,66 @@ if prompt:
         # ── Copy button for the final reply ───────────────────────
         if response_content:
             _copy_button(response_content, key="copy_live_reply")
+
+        # ── Response time display ────────────────────────────────
+        if response_content:
+            st.caption(f"Response time: {elapsed:.1f}s")
+            st.session_state.response_times.append(round(elapsed, 1))
+
+        # ── Visual plan outputs ──────────────────────────────────
+        if response_content and tool_used:
+            _profile = st.session_state.agent_state.get("user_profile", {})
+            _wf = st.session_state.agent_state.get("workflow", {})
+            _plan_stage = _wf.get("stage", "")
+            # Show visualizations when a plan has been generated
+            if len(response_content) > 300 and any(
+                kw in response_content.lower()
+                for kw in ["plan", "day 1", "monday", "week", "meal", "calories", "sets", "reps"]
+            ):
+                try:
+                    from agent.visualizations import (
+                        create_macro_pie_chart,
+                        create_progress_timeline,
+                        create_weekly_schedule,
+                    )
+                    with st.expander("📈 Visual Plan Outputs", expanded=True):
+                        if tool_used == "workout_tool":
+                            _days = _profile.get("workout_days", 4)
+                            fig1 = create_weekly_schedule(
+                                workout_days=_days if isinstance(_days, int) else 4,
+                                plan_text=response_content,
+                                profile=_profile,
+                            )
+                            st.pyplot(fig1)
+                            plt.close(fig1)
+
+                            fig2 = create_progress_timeline(
+                                weeks=12,
+                                profile=_profile,
+                            )
+                            st.pyplot(fig2)
+                            plt.close(fig2)
+
+                        elif tool_used == "diet_tool":
+                            fig = create_macro_pie_chart(
+                                plan_text=response_content,
+                                profile=_profile,
+                            )
+                            st.pyplot(fig)
+                            plt.close(fig)
+                except Exception as viz_err:
+                    _ui_logger.warning("Visualization error: %s", viz_err)
+
+        # ── User feedback widget ─────────────────────────────────
+        if response_content:
+            feedback_col1, feedback_col2 = st.columns([1, 3])
+            with feedback_col1:
+                rating = st.feedback("stars", key=f"fb_{turn_id}")
+            with feedback_col2:
+                if rating is not None:
+                    _ctx = st.session_state.agent_state.get("context_id", "")
+                    save_feedback(_ctx, turn_id, rating + 1)  # st.feedback is 0-indexed
+                    st.caption("Thanks for your feedback!")
 
     # ── Sync agent state with final graph state ───────────────────
     if final_event and final_event.get("messages"):

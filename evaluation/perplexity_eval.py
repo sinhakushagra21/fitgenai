@@ -48,7 +48,9 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_FILE = PROJECT_ROOT / "data" / "test.jsonl"
 
-MODEL = "gpt-5-mini"
+from agent.config import DEFAULT_MODEL
+
+MODEL = DEFAULT_MODEL
 
 
 def _load_jsonl(path: Path) -> list[dict]:

@@ -29,7 +29,9 @@ from agent.rag.retriever import retrieve, format_context
 
 logger = logging.getLogger("fitgen.rag_tool")
 
-MODEL = "gpt-5-mini"
+from agent.config import DEFAULT_MODEL
+
+MODEL = DEFAULT_MODEL
 
 _RAG_SYSTEM_PROMPT = """You are FITGEN.AI, an expert fitness and nutrition coach powered by
 Retrieval-Augmented Generation (RAG).

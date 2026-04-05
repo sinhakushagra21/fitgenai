@@ -41,7 +41,9 @@ load_dotenv()
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-MODEL = "gpt-5-mini"
+from agent.config import DEFAULT_MODEL
+
+MODEL = DEFAULT_MODEL
 
 # Queries specifically designed to test RAG benefit
 RAG_TEST_QUERIES = [
