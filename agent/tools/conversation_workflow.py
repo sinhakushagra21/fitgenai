@@ -447,16 +447,41 @@ def build_profile_bulk_question(fields: list[str]) -> str:
     )
 
 
-def generate_plan(domain: str, profile: dict[str, Any], query: str, system_prompt: str) -> str:
-    # Single plan generator used by both create/modify branches.
-    # Why: keeps output style and constraints consistent.
+def generate_plan(
+    domain: str,
+    profile: dict[str, Any],
+    query: str,
+    system_prompt: str,
+    *,
+    existing_plan: str = "",
+) -> str:
+    """Generate or update a plan. When *existing_plan* is provided the LLM is
+    instructed to modify that plan according to the user's latest request while
+    preserving everything else (calories, macros, structure)."""
     llm = ChatOpenAI(model=_LLM_MODEL, temperature=0.5)
-    prompt = (
-        f"Create a personalized {domain} plan using this profile:\n"
-        f"{json.dumps(profile, indent=2)}\n\n"
-        f"Latest user instruction: {query}\n"
-        "Provide practical, safe, actionable steps with concise structure."
-    )
+
+    if existing_plan:
+        prompt = (
+            f"The user already has this {domain} plan:\n"
+            f"--- EXISTING PLAN START ---\n{existing_plan}\n--- EXISTING PLAN END ---\n\n"
+            f"User profile:\n{json.dumps(profile, indent=2)}\n\n"
+            f"The user wants the following change: {query}\n\n"
+            "RULES:\n"
+            "- Apply ONLY the requested change. Do NOT recalculate calories, macros, "
+            "or restructure the plan unless the user explicitly asks for that.\n"
+            "- Keep the same calorie target, macro split, and meal structure from the "
+            "existing plan.\n"
+            "- Output the COMPLETE updated plan once (do NOT output it twice).\n"
+        )
+    else:
+        prompt = (
+            f"Create a personalized {domain} plan using this profile:\n"
+            f"{json.dumps(profile, indent=2)}\n\n"
+            f"Latest user instruction: {query}\n"
+            "Provide practical, safe, actionable steps with concise structure.\n"
+            "Output the plan exactly ONCE — do NOT repeat or duplicate any tables."
+        )
+
     resp = llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=prompt),
@@ -613,7 +638,11 @@ def handle_multi_turn(
                 else:
                     # Fallback if Google credentials not configured.
                     update_calendar_sync(state_id, True)
-                    workflow = append_completed_step(workflow, {}, "calendar_sync_enabled_no_oauth")
+                    workflow = append_completed_step(
+                        workflow,
+                        {"stage": "", "pending_question": ""},
+                        "calendar_sync_enabled_no_oauth",
+                    )
                     return build_response(
                         assistant_message=(
                             "I marked your plan for Google Calendar sync, but the Google Calendar "
@@ -630,7 +659,11 @@ def handle_multi_turn(
 
             if classified_intent == "reject":
                 update_calendar_sync(state_id, False)
-                workflow = append_completed_step(workflow, {}, "calendar_sync_skipped")
+                workflow = append_completed_step(
+                    workflow,
+                    {"stage": "", "pending_question": ""},
+                    "calendar_sync_skipped",
+                )
                 return build_response(
                     assistant_message="No problem — I won't sync it to Google Calendar.",
                     state_id=state_id,
@@ -943,7 +976,11 @@ def handle_multi_turn(
                 state_manager=state_manager,
             )
 
-        plan = generate_plan(domain, merged_profile, query, plan_system_prompt)
+        existing_plan_text = record.get("plan_text", "") or workflow.get("plan_text", "")
+        plan = generate_plan(
+            domain, merged_profile, query, plan_system_prompt,
+            existing_plan=existing_plan_text,
+        )
         upsert_record(state_id=state_id, domain=domain, profile=merged_profile, plan_text=plan, calendar_sync=record.get("calendar_sync", False))
         update_feedback_msg = (
             f"Done — I updated your {domain} plan.\n\n{plan}\n\n"

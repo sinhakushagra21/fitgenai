@@ -25,7 +25,7 @@ from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger("fitgen.calendar")
 
-_LLM_MODEL = os.getenv("FITGEN_LLM_MODEL", "gpt-4o-mini")
+_LLM_MODEL = os.getenv("FITGEN_LLM_MODEL", "gpt-4.1")
 _SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 _REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8501")
 

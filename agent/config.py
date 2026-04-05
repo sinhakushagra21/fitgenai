@@ -8,4 +8,4 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_MODEL = os.getenv("FITGEN_LLM_MODEL", "gpt-4o-mini")
+DEFAULT_MODEL = os.getenv("FITGEN_LLM_MODEL", "gpt-4.1")

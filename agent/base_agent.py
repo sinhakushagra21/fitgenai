@@ -185,4 +185,4 @@ def make_base_agent(prompt_key: str = "zero_shot"):
 # ── Default node (zero-shot) ──────────────────────────────────────
 # graph.py imports this directly; swap to make_base_agent("cot") etc.
 # to change the base agent's prompting technique globally.
-base_agent = make_base_agent("zero_shot")
+base_agent = make_base_agent("few_shot")

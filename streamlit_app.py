@@ -103,10 +103,10 @@ st.set_page_config(
 load_dotenv()
 init_db()
 
-if not os.getenv("OPENAI_API_KEY"):
+if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENAI_API_KEY"):
     st.error(
-        "**OPENAI_API_KEY not found.**  "
-        "Copy `.env.example` → `.env` and add your key, then restart."
+        "**API key not found.**  "
+        "Copy `.env.example` → `.env` and add your `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`), then restart."
     )
     st.stop()
 
@@ -244,7 +244,7 @@ def _run_base_comparison(query: str) -> dict[str, str]:
     _ui_logger.info("[BaseCompare] Starting comparison across %d techniques", len(TECHNIQUE_KEYS))
 
     def _call(tech: str) -> tuple[str, str]:
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+        llm = ChatOpenAI(model="gpt-4.1", temperature=0.7)
         resp = llm.invoke(
             [SystemMessage(content=BASE_PROMPTS[tech]), HumanMessage(content=query)]
         )
@@ -551,49 +551,44 @@ if prompt:
             st.caption(f"Response time: {elapsed:.1f}s")
             st.session_state.response_times.append(round(elapsed, 1))
 
-        # ── Visual plan outputs ──────────────────────────────────
-        if response_content and tool_used:
+        # ── Visual plan outputs (only when user asks) ─────────────
+        _viz_keywords = ["chart", "graph", "visuali", "pie chart", "show me a", "plot", "diagram"]
+        _user_wants_viz = any(kw in prompt.lower() for kw in _viz_keywords)
+        if response_content and tool_used and _user_wants_viz:
             _profile = st.session_state.agent_state.get("user_profile", {})
-            _wf = st.session_state.agent_state.get("workflow", {})
-            _plan_stage = _wf.get("stage", "")
-            # Show visualizations when a plan has been generated
-            if len(response_content) > 300 and any(
-                kw in response_content.lower()
-                for kw in ["plan", "day 1", "monday", "week", "meal", "calories", "sets", "reps"]
-            ):
-                try:
-                    from agent.visualizations import (
-                        create_macro_pie_chart,
-                        create_progress_timeline,
-                        create_weekly_schedule,
-                    )
-                    with st.expander("📈 Visual Plan Outputs", expanded=True):
-                        if tool_used == "workout_tool":
-                            _days = _profile.get("workout_days", 4)
-                            fig1 = create_weekly_schedule(
-                                workout_days=_days if isinstance(_days, int) else 4,
-                                plan_text=response_content,
-                                profile=_profile,
-                            )
-                            st.pyplot(fig1)
-                            plt.close(fig1)
+            try:
+                from agent.visualizations import (
+                    create_macro_pie_chart,
+                    create_progress_timeline,
+                    create_weekly_schedule,
+                )
+                with st.expander("📈 Visual Plan Outputs", expanded=True):
+                    if tool_used == "workout_tool":
+                        _days = _profile.get("workout_days", 4)
+                        fig1 = create_weekly_schedule(
+                            workout_days=_days if isinstance(_days, int) else 4,
+                            plan_text=response_content,
+                            profile=_profile,
+                        )
+                        st.pyplot(fig1)
+                        plt.close(fig1)
 
-                            fig2 = create_progress_timeline(
-                                weeks=12,
-                                profile=_profile,
-                            )
-                            st.pyplot(fig2)
-                            plt.close(fig2)
+                        fig2 = create_progress_timeline(
+                            weeks=12,
+                            profile=_profile,
+                        )
+                        st.pyplot(fig2)
+                        plt.close(fig2)
 
-                        elif tool_used == "diet_tool":
-                            fig = create_macro_pie_chart(
-                                plan_text=response_content,
-                                profile=_profile,
-                            )
-                            st.pyplot(fig)
-                            plt.close(fig)
-                except Exception as viz_err:
-                    _ui_logger.warning("Visualization error: %s", viz_err)
+                    elif tool_used == "diet_tool":
+                        fig = create_macro_pie_chart(
+                            plan_text=response_content,
+                            profile=_profile,
+                        )
+                        st.pyplot(fig)
+                        plt.close(fig)
+            except Exception as viz_err:
+                _ui_logger.warning("Visualization error: %s", viz_err)
 
         # ── User feedback widget ─────────────────────────────────
         if response_content:

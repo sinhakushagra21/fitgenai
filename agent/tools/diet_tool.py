@@ -63,5 +63,5 @@ def diet_tool(query: str, state: Annotated[dict[str, Any], InjectedState]) -> st
         domain="diet",
         query=effective_query,
         state=state,
-        plan_system_prompt=DIET_PROMPTS["cot"],
+        plan_system_prompt=DIET_PROMPTS["few_shot"],
     )
