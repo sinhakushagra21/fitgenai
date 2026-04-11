@@ -36,8 +36,10 @@ from langchain_openai import ChatOpenAI
 from agent import AgentState, create_graph
 from agent.feedback import get_average_rating, save_feedback
 from agent.persistence import get_context_state, get_latest_context_state_by_email, init_db
+from agent.config import DEFAULT_MODEL, FAST_MODEL
 from agent.prompts.base_prompts import BASE_PROMPTS
 from agent.prompts.techniques import TECHNIQUE_KEYS, TECHNIQUE_META
+from agent.tools.conversation_workflow import DOMAIN_REQUIRED_FIELDS
 
 
 # ── Log capture ───────────────────────────────────────────────────
@@ -94,10 +96,300 @@ _fitgen_logger.setLevel(logging.DEBUG)
 
 # ── Page config ───────────────────────────────────────────────────
 st.set_page_config(
-    page_title="FITGEN.AI — Prompt Engineering Demo",
-    page_icon="💪",
+    page_title="FITGEN.AI — AI Fitness Coach",
+    page_icon="🔥",
     layout="wide",
 )
+
+# ── Custom CSS: Dark fitness theme ────────────────────────────────
+st.markdown("""
+<style>
+/* ── Import Google Fonts ────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+/* ── Root variables ─────────────────────────────────── */
+:root {
+    --bg-dark: #0a0a0a;
+    --bg-card: #1a1a1a;
+    --bg-card-hover: #222222;
+    --accent-orange: #ff6b2b;
+    --accent-orange-glow: rgba(255, 107, 43, 0.3);
+    --accent-red: #e63946;
+    --accent-green: #2ecc71;
+    --text-primary: #f5f5f5;
+    --text-secondary: #a0a0a0;
+    --text-muted: #666666;
+    --border-subtle: #2a2a2a;
+    --gradient-hero: linear-gradient(135deg, #ff6b2b 0%, #e63946 100%);
+}
+
+/* ── Global overrides ───────────────────────────────── */
+.stApp {
+    background-color: var(--bg-dark) !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* ── Sidebar styling ────────────────────────────────── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #111111 0%, #0d0d0d 100%) !important;
+    border-right: 1px solid var(--border-subtle) !important;
+}
+
+section[data-testid="stSidebar"] .stMarkdown p,
+section[data-testid="stSidebar"] .stMarkdown li {
+    color: var(--text-secondary) !important;
+    font-size: 0.85rem !important;
+}
+
+section[data-testid="stSidebar"] h2 {
+    color: var(--accent-orange) !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+}
+
+/* ── Chat messages ──────────────────────────────────── */
+.stChatMessage {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 16px !important;
+    padding: 1rem 1.25rem !important;
+    margin-bottom: 0.75rem !important;
+}
+
+/* ── Chat input ─────────────────────────────────────── */
+.stChatInput {
+    border-color: var(--border-subtle) !important;
+}
+
+.stChatInput > div {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 16px !important;
+}
+
+.stChatInput textarea {
+    color: var(--text-primary) !important;
+}
+
+/* ── Buttons ────────────────────────────────────────── */
+.stButton > button {
+    border-radius: 12px !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton > button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 15px var(--accent-orange-glow) !important;
+}
+
+.stFormSubmitButton > button {
+    background: var(--gradient-hero) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important;
+    padding: 0.6rem 2rem !important;
+    letter-spacing: 0.02em !important;
+    transition: all 0.3s ease !important;
+}
+
+.stFormSubmitButton > button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 25px var(--accent-orange-glow) !important;
+}
+
+/* ── Forms ──────────────────────────────────────────── */
+[data-testid="stForm"] {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 16px !important;
+    padding: 1.5rem !important;
+}
+
+/* ── Input fields ───────────────────────────────────── */
+.stTextInput > div > div,
+.stNumberInput > div > div,
+.stSelectbox > div > div {
+    background: #111111 !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 10px !important;
+    color: var(--text-primary) !important;
+}
+
+.stTextInput input,
+.stNumberInput input {
+    color: var(--text-primary) !important;
+}
+
+/* ── Progress bar ───────────────────────────────────── */
+.stProgress > div > div > div {
+    background: var(--gradient-hero) !important;
+    border-radius: 10px !important;
+}
+
+/* ── Expanders ──────────────────────────────────────── */
+.streamlit-expanderHeader {
+    background: var(--bg-card) !important;
+    border-radius: 12px !important;
+    color: var(--text-primary) !important;
+}
+
+/* ── Status widget ──────────────────────────────────── */
+[data-testid="stStatusWidget"] {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 12px !important;
+}
+
+/* ── Dividers ───────────────────────────────────────── */
+hr {
+    border-color: var(--border-subtle) !important;
+}
+
+/* ── Custom hero section ────────────────────────────── */
+.hero-container {
+    background: linear-gradient(135deg, rgba(255,107,43,0.08) 0%, rgba(230,57,70,0.05) 100%);
+    border: 1px solid var(--border-subtle);
+    border-radius: 20px;
+    padding: 2rem 2.5rem;
+    margin-bottom: 1.5rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.hero-container::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(255,107,43,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+}
+
+.hero-title {
+    font-family: 'Inter', sans-serif;
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #ff6b2b 0%, #ff8f5e 50%, #e63946 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.25rem;
+    line-height: 1.1;
+}
+
+.hero-subtitle {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    font-weight: 400;
+    margin-bottom: 1.25rem;
+    max-width: 600px;
+}
+
+.hero-tags {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.hero-tag {
+    background: rgba(255,107,43,0.12);
+    color: var(--accent-orange);
+    padding: 0.3rem 0.85rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border: 1px solid rgba(255,107,43,0.2);
+    letter-spacing: 0.02em;
+}
+
+/* ── Tool badges ────────────────────────────────────── */
+.tool-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 0.03em;
+    margin-bottom: 8px;
+}
+
+.tool-badge-workout { background: linear-gradient(135deg, #2e7d32, #4caf50); }
+.tool-badge-diet    { background: linear-gradient(135deg, #1565c0, #42a5f5); }
+.tool-badge-general { background: linear-gradient(135deg, #6a1b9a, #ab47bc); }
+.tool-badge-rag     { background: linear-gradient(135deg, #e65100, #ff9800); }
+
+/* ── Sidebar stats cards ────────────────────────────── */
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.stat-card-label {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.stat-card-value {
+    color: var(--accent-orange);
+    font-size: 1.3rem;
+    font-weight: 800;
+}
+
+/* ── Sidebar progress section ───────────────────────── */
+.progress-stage {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    padding: 0.4rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.progress-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.progress-dot-done     { background: var(--accent-green); }
+.progress-dot-active   { background: var(--accent-orange); box-shadow: 0 0 8px var(--accent-orange-glow); }
+.progress-dot-pending  { background: var(--text-muted); }
+
+/* ── Metrics override ───────────────────────────────── */
+[data-testid="stMetric"] {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 12px !important;
+    padding: 0.75rem 1rem !important;
+}
+
+[data-testid="stMetricValue"] {
+    color: var(--accent-orange) !important;
+    font-weight: 800 !important;
+}
+
+/* ── Scrollbar ──────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+</style>
+""", unsafe_allow_html=True)
 
 # ── Load env ──────────────────────────────────────────────────────
 load_dotenv()
@@ -124,19 +416,23 @@ if "code" in _gcal_params:
 
     try:
         from agent.tools.calendar_integration import (
+            clear_oauth_context,
             exchange_code_for_tokens,
             extract_calendar_events,
+            load_oauth_context,
             push_events_to_calendar,
         )
 
+        # Exchange auth code for tokens (PKCE is disabled — no code_verifier needed).
         tokens = exchange_code_for_tokens(_gcal_code)
-        _gcal_logger.info("[Calendar] Token exchange successful")
 
-        # Pull plan_text and domain from workflow state.
+        # Load plan data from persisted context file (survives the redirect).
+        # Fall back to session state if context file was empty.
+        _oauth_ctx = load_oauth_context()
         _wf = st.session_state.get("agent_state", {}).get("workflow", {})
-        _plan_text = _wf.get("plan_text", "")
-        _domain = _wf.get("domain", "diet")
-        _profile = st.session_state.get("agent_state", {}).get("user_profile", {})
+        _plan_text = _oauth_ctx.get("plan_text") or _wf.get("plan_text", "")
+        _domain = _oauth_ctx.get("domain") or _wf.get("domain", "diet")
+        _profile = _oauth_ctx.get("profile") or st.session_state.get("agent_state", {}).get("user_profile", {})
 
         if _plan_text:
             events = extract_calendar_events(_plan_text, _domain, _profile)
@@ -151,6 +447,7 @@ if "code" in _gcal_params:
                 # Store tokens in session for potential future use.
                 st.session_state["google_calendar_tokens"] = tokens
                 st.session_state["calendar_events_pushed"] = True
+                clear_oauth_context()  # Clean up temp file after success
             else:
                 st.warning("⚠️ Connected to Google, but couldn't extract events from the plan.")
         else:
@@ -184,42 +481,200 @@ if "agent_state" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+if "profile_form_pending" not in st.session_state:
+    st.session_state.profile_form_pending = False
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
-TOOL_LABELS: dict[str, tuple[str, str]] = {
-    "workout_tool": ("💪 Workout Coach", "#2e7d32"),
-    "diet_tool":    ("🥗 Diet Coach",    "#1565c0"),
-    "general":      ("🤖 FITGEN.AI",     "#6a1b9a"),
+TOOL_LABELS: dict[str, tuple[str, str, str]] = {
+    "workout_tool":    ("💪 Workout Coach",   "tool-badge-workout",  "#2e7d32"),
+    "diet_tool":       ("🥗 Diet Coach",      "tool-badge-diet",     "#1565c0"),
+    "rag_query_tool":  ("📚 Knowledge Base",  "tool-badge-rag",      "#e65100"),
+    "general":         ("🤖 FITGEN.AI",       "tool-badge-general",  "#6a1b9a"),
 }
 
 
 def _badge(tool: str) -> str:
     """Return an HTML pill badge for the given tool name."""
-    label, color = TOOL_LABELS.get(tool, TOOL_LABELS["general"])
-    return (
-        f'<span style="background:{color};color:white;padding:3px 12px;'
-        f'border-radius:12px;font-size:0.75rem;font-weight:600;'
-        f'margin-bottom:8px;display:inline-block">{label}</span>'
-    )
+    label, css_class, _fallback = TOOL_LABELS.get(tool, TOOL_LABELS["general"])
+    return f'<span class="tool-badge {css_class}">{label}</span>'
 
 
 def _copy_button(text: str, key: str) -> None:
-    """Render a small JS-powered copy-to-clipboard button."""
-    # Escape backticks and backslashes so the text is safe inside a JS template literal
-    safe = text.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
+    """Render a small JS-powered copy-to-clipboard button.
+
+    Uses base64 encoding to safely embed arbitrary text (markdown tables,
+    special characters, emojis, newlines) inside the JS without breaking
+    the HTML template.
+    """
+    import base64
+
+    b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
     st.components.v1.html(
         f"""
-        <button onclick="navigator.clipboard.writeText(`{safe}`).then(()=>{{
-            this.textContent='✅ Copied!';
-            setTimeout(()=>this.textContent='📋 Copy', 1500);
-        }})"
+        <button onclick="
+            var t = atob('{b64}');
+            navigator.clipboard.writeText(t).then(function(){{
+                this.textContent='Copied!';
+                var btn=this;
+                setTimeout(function(){{btn.textContent='Copy';}}, 1500);
+            }}.bind(this));
+        "
         style="background:#374151;color:#e5e7eb;border:none;border-radius:6px;
                padding:4px 12px;font-size:0.75rem;cursor:pointer;margin-top:4px;">
-            📋 Copy
+            Copy
         </button>
         """,
         height=38,
     )
+
+
+# ── Profile intake form config ────────────────────────────────────────
+
+PROFILE_FORM_FIELDS: dict[str, dict] = {
+    # ── Stats ────────────────────────────────────────────────────
+    "name":            {"type": "text",      "label": "Name"},
+    "age":             {"type": "number",    "label": "Age", "min": 10, "max": 100, "step": 1, "default": 25},
+    "sex":             {"type": "selectbox", "label": "Biological Sex", "options": ["male", "female"]},
+    "height_cm":       {"type": "number",    "label": "Height (cm)", "min": 50.0, "max": 300.0, "step": 0.5, "default": 170.0},
+    "weight_kg":       {"type": "number",    "label": "Current Weight (kg)", "min": 20.0, "max": 300.0, "step": 0.5, "default": 70.0},
+    "goal":            {"type": "selectbox", "label": "Primary Goal", "options": ["fat loss", "muscle gain", "maintenance", "performance"]},
+    "goal_weight":     {"type": "text",      "label": "Goal Weight (kg) or how you want to look/feel"},
+    "weight_loss_pace": {"type": "selectbox", "label": "How quickly?", "options": ["steady & sustainable", "moderate", "as fast as safely possible"]},
+    # ── Lifestyle ────────────────────────────────────────────────
+    "job_type":        {"type": "selectbox", "label": "Job Type", "options": ["desk job", "on my feet (retail/teaching)", "manual labour", "work from home", "other"]},
+    "exercise_frequency": {"type": "selectbox", "label": "Exercise per Week", "options": ["0 (none)", "1-2 times", "3-4 times", "5-6 times", "daily"]},
+    "exercise_type":   {"type": "text",      "label": "Type of Exercise (weights, running, sports, yoga, etc.)"},
+    "sleep_hours":     {"type": "number",    "label": "Sleep (hours/night)", "min": 3, "max": 12, "step": 1, "default": 7},
+    "stress_level":    {"type": "selectbox", "label": "Stress Level", "options": ["low", "moderate", "high"]},
+    "alcohol_intake":  {"type": "text",      "label": "Alcohol Intake (e.g. '4 beers/week' or 'none')"},
+    # ── Food Preferences ─────────────────────────────────────────
+    "diet_preference": {"type": "selectbox", "label": "Diet Preference", "options": ["omnivore", "vegetarian", "vegan", "eggetarian", "pescatarian"]},
+    "favourite_meals": {"type": "textarea",  "label": "Top 5 Favourite Meals / Dishes (any cuisine)"},
+    "foods_to_avoid":  {"type": "text",      "label": "Foods You Hate / Would Never Eat (or 'none')"},
+    "allergies":       {"type": "text",      "label": "Allergies / Intolerances (or 'none')"},
+    "cooking_style":   {"type": "selectbox", "label": "Cooking Style", "options": ["cook from scratch", "quick meals (under 20 min)", "batch meal prep", "mix of all"]},
+    "food_adventurousness": {"type": "number", "label": "Food Adventurousness (1-10)", "min": 1, "max": 10, "step": 1, "default": 5},
+    # ── Snack Habits ─────────────────────────────────────────────
+    "current_snacks":  {"type": "text",      "label": "Current Snacks (what you reach for during the day)"},
+    "snack_reason":    {"type": "selectbox", "label": "Why Do You Snack?", "options": ["hunger", "boredom", "habit", "mix of all"]},
+    "snack_preference": {"type": "selectbox", "label": "Snack Preference", "options": ["sweet", "savoury", "both"]},
+    "late_night_snacking": {"type": "selectbox", "label": "Late Night Snacking?", "options": ["yes", "sometimes", "no"]},
+    # ── Workout-specific ─────────────────────────────────────────
+    "activity_level":  {"type": "selectbox", "label": "Activity Level", "options": ["sedentary", "light", "moderate", "high", "athlete"]},
+    "fitness_level":   {"type": "selectbox", "label": "Fitness Level", "options": ["beginner", "intermediate", "advanced"]},
+    "equipment":       {"type": "text",      "label": "Equipment Available"},
+    "workout_days":    {"type": "number",    "label": "Workout Days Per Week", "min": 1, "max": 7, "step": 1, "default": 4},
+    "additional_info": {"type": "textarea",  "label": "Injuries, Physical Limitations, or Other Info (optional)"},
+}
+
+
+def _render_profile_form(domain: str, existing_profile: dict) -> dict | None:
+    """Render a Streamlit form for profile intake.
+
+    Only shows fields that are missing from existing_profile.
+    Returns the *complete* profile (existing + new) on submit, else None.
+    If no fields are missing returns the existing profile immediately (auto-skip).
+    """
+    required = DOMAIN_REQUIRED_FIELDS.get(domain, list(PROFILE_FORM_FIELDS.keys()))
+    tool_name = "diet_tool" if domain == "diet" else "workout_tool"
+
+    # Determine which fields still need to be collected
+    missing_fields = [f for f in required if not existing_profile.get(f)]
+
+    # If everything is already filled (e.g. switching from diet → workout
+    # where base fields are shared), auto-skip the form entirely.
+    if not missing_fields:
+        return dict(existing_profile)
+
+    st.markdown(_badge(tool_name), unsafe_allow_html=True)
+    if len(missing_fields) < len(required):
+        filled = [f for f in required if f not in missing_fields]
+        filled_summary = ", ".join(
+            f"**{PROFILE_FORM_FIELDS[f]['label']}**: {existing_profile[f]}"
+            for f in filled if f in PROFILE_FORM_FIELDS
+        )
+        st.markdown(f"I already have: {filled_summary}")
+        st.markdown("**Please fill in the remaining details:**")
+    else:
+        st.markdown("**Please fill in your profile details to get started:**")
+
+    # Separate regular fields from full-width fields (textarea)
+    _OPTIONAL_FIELDS = {"additional_info", "favourite_meals"}
+    _regular_fields = [f for f in missing_fields if PROFILE_FORM_FIELDS.get(f, {}).get("type") != "textarea"]
+    _fullwidth_fields = [f for f in missing_fields if PROFILE_FORM_FIELDS.get(f, {}).get("type") == "textarea"]
+
+    _form_key = f"profile_intake_{domain}"
+    with st.form(_form_key, clear_on_submit=False):
+        form_values: dict = {}
+        col1, col2 = st.columns(2)
+
+        for i, field in enumerate(_regular_fields):
+            cfg = PROFILE_FORM_FIELDS.get(field)
+            if not cfg:
+                continue
+            target_col = col1 if i % 2 == 0 else col2
+            _wkey = f"form_{domain}_{field}"
+
+            with target_col:
+                if cfg["type"] == "text":
+                    form_values[field] = st.text_input(
+                        cfg["label"],
+                        value="",
+                        key=_wkey,
+                    )
+                elif cfg["type"] == "number":
+                    form_values[field] = st.number_input(
+                        cfg["label"],
+                        min_value=cfg["min"],
+                        max_value=cfg["max"],
+                        value=cfg.get("default", cfg["min"]),
+                        step=cfg["step"],
+                        key=_wkey,
+                    )
+                elif cfg["type"] == "selectbox":
+                    form_values[field] = st.selectbox(
+                        cfg["label"],
+                        options=cfg["options"],
+                        index=0,
+                        key=_wkey,
+                    )
+
+        # Full-width fields (textarea) rendered below the columns
+        for field in _fullwidth_fields:
+            cfg = PROFILE_FORM_FIELDS.get(field)
+            if not cfg:
+                continue
+            _wkey = f"form_{domain}_{field}"
+            form_values[field] = st.text_area(
+                cfg["label"],
+                value="",
+                height=100,
+                key=_wkey,
+            )
+
+        submitted = st.form_submit_button("Submit Profile", use_container_width=True, type="primary")
+
+    if submitted:
+        # Validate required fields (skip optional ones)
+        _required_missing = [
+            f for f in missing_fields
+            if f not in _OPTIONAL_FIELDS and not form_values.get(f)
+        ]
+        if _required_missing:
+            labels = [PROFILE_FORM_FIELDS[f]["label"] for f in _required_missing if f in PROFILE_FORM_FIELDS]
+            st.warning(f"Please fill in: {', '.join(labels)}")
+            return None
+        # Default optional empty fields to 'none'
+        for f in _OPTIONAL_FIELDS:
+            if f in form_values and not form_values[f].strip():
+                form_values[f] = "none"
+        # Merge existing profile with new form values
+        merged = dict(existing_profile)
+        merged.update(form_values)
+        return merged
+
+    return None
 
 
 def _render_technique_tabs(results: dict[str, str]) -> None:
@@ -244,7 +699,7 @@ def _run_base_comparison(query: str) -> dict[str, str]:
     _ui_logger.info("[BaseCompare] Starting comparison across %d techniques", len(TECHNIQUE_KEYS))
 
     def _call(tech: str) -> tuple[str, str]:
-        llm = ChatOpenAI(model="gpt-4.1", temperature=0.7)
+        llm = ChatOpenAI(model=FAST_MODEL, temperature=0.7)
         resp = llm.invoke(
             [SystemMessage(content=BASE_PROMPTS[tech]), HumanMessage(content=query)]
         )
@@ -261,49 +716,154 @@ def _run_base_comparison(query: str) -> dict[str, str]:
     return {k: results[k] for k in TECHNIQUE_KEYS if k in results}
 
 
-# ── Header ────────────────────────────────────────────────────────
+# ── Hero Section ──────────────────────────────────────────────────
 
-col_title, col_sub = st.columns([2, 3])
-with col_title:
-    st.markdown("# 💪 FITGEN.AI")
-with col_sub:
+_is_fresh_session = len(st.session_state.chat_history) == 0
+
+if _is_fresh_session:
+    st.markdown("""
+    <div class="hero-container">
+        <div class="hero-title">FITGEN.AI</div>
+        <div class="hero-subtitle">
+            Your AI-powered fitness coach. Get personalized workout routines and
+            diet plans tailored to your goals, body type, and lifestyle.
+        </div>
+        <div class="hero-tags">
+            <span class="hero-tag">🏋️ Workout Plans</span>
+            <span class="hero-tag">🥗 Diet & Nutrition</span>
+            <span class="hero-tag">📊 Macro Tracking</span>
+            <span class="hero-tag">📅 Calendar Sync</span>
+            <span class="hero-tag">🤖 AI Powered</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Quick-start prompt suggestions
     st.markdown(
-        "<p style='color:gray;margin-top:1.1rem;'>"
-        "Prompt Engineering Demo · 5 Techniques · Live Comparison"
-        "</p>",
+        "<p style='color:#666;font-size:0.85rem;margin-bottom:0.5rem;font-weight:600;'>"
+        "GET STARTED</p>",
         unsafe_allow_html=True,
     )
-st.divider()
+    _qcols = st.columns(3)
+    with _qcols[0]:
+        if st.button("🥗 Create a diet plan", use_container_width=True):
+            st.session_state._quick_prompt = "Create a diet plan"
+            st.rerun()
+    with _qcols[1]:
+        if st.button("💪 Create a workout plan", use_container_width=True):
+            st.session_state._quick_prompt = "Create a workout plan"
+            st.rerun()
+    with _qcols[2]:
+        if st.button("❓ What can you do?", use_container_width=True):
+            st.session_state._quick_prompt = "What can you help me with?"
+            st.rerun()
+    st.markdown("")
+else:
+    st.markdown(
+        '<div style="padding:0.5rem 0 0.25rem 0;">'
+        '<span style="font-size:1.4rem;font-weight:800;'
+        'background:linear-gradient(135deg,#ff6b2b,#e63946);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;">'
+        '🔥 FITGEN.AI</span></div>',
+        unsafe_allow_html=True,
+    )
 
 # ── Sidebar ───────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("## 🧠 Prompting Techniques")
-    for key in TECHNIQUE_KEYS:
-        m = TECHNIQUE_META[key]
+    # ── Branding ───────────────────────────────────────────────
+    st.markdown(
+        '<div style="text-align:center;padding:0.5rem 0 1rem 0;">'
+        '<span style="font-size:1.6rem;font-weight:900;'
+        'background:linear-gradient(135deg,#ff6b2b,#e63946);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;">'
+        '🔥 FITGEN.AI</span><br>'
+        '<span style="color:#666;font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;">'
+        'AI-Powered Fitness Coach</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.divider()
+
+    # ── Workflow Progress ──────────────────────────────────────
+    st.markdown("## 📊 Session")
+    _workflow = st.session_state.agent_state.get("workflow", {})
+    _stage = _workflow.get("stage", "")
+    _domain = _workflow.get("domain", "")
+    _completed = _workflow.get("completed_steps", [])
+
+    _STAGES = [
+        ("collect_profile",  "Profile"),
+        ("confirm_profile",  "Confirm"),
+        ("plan_feedback",    "Plan Review"),
+        ("calendar_sync",    "Calendar"),
+    ]
+    _is_complete = any(s in _completed for s in ("plan_confirmed", "calendar_sync_yes", "calendar_sync_no"))
+
+    if _domain:
         st.markdown(
-            f"**{m['icon']} {m['label']}** — <span style='color:{m['color']};font-size:0.85rem;'>{m['description']}</span>",
+            f'<div class="stat-card"><div class="stat-card-label">Active Domain</div>'
+            f'<div class="stat-card-value">{_domain.title()}</div></div>',
             unsafe_allow_html=True,
         )
+
+    for _s_key, _s_label in _STAGES:
+        if _is_complete or _s_key in _completed or any(_s_key in c for c in _completed):
+            _dot = "progress-dot-done"
+            _style = "color:#2ecc71;"
+        elif _s_key == _stage:
+            _dot = "progress-dot-active"
+            _style = "color:#ff6b2b;font-weight:600;"
+        else:
+            _dot = "progress-dot-pending"
+            _style = "color:#666;"
+        st.markdown(
+            f'<div class="progress-stage">'
+            f'<span class="progress-dot {_dot}"></span>'
+            f'<span style="{_style}">{_s_label}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    if _is_complete:
+        st.success("Plan complete!")
+
     st.divider()
 
-    st.markdown("## 🔀 Routing")
-    st.markdown(
-        """
-        - 💪 **workout_tool** — training plans & exercise science
-        - 🥗 **diet_tool** — nutrition, meals & macros
-        - 🤖 **Direct reply** — greetings & mixed topics
-        """
-    )
+    # ── Stats ────────────────────────────────────────────────────
+    _ctx_id = st.session_state.agent_state.get("context_id", "")
+    _avg_rating = get_average_rating(_ctx_id) if _ctx_id else None
+
+    if "response_times" not in st.session_state:
+        st.session_state.response_times = []
+
+    _stat_cols = st.columns(2)
+    with _stat_cols[0]:
+        _rating_val = f"{_avg_rating}/5" if _avg_rating else "—"
+        st.markdown(
+            f'<div class="stat-card"><div class="stat-card-label">Rating</div>'
+            f'<div class="stat-card-value">{_rating_val}</div></div>',
+            unsafe_allow_html=True,
+        )
+    with _stat_cols[1]:
+        _avg_t = (
+            f"{sum(st.session_state.response_times) / len(st.session_state.response_times):.1f}s"
+            if st.session_state.response_times
+            else "—"
+        )
+        st.markdown(
+            f'<div class="stat-card"><div class="stat-card-label">Avg Speed</div>'
+            f'<div class="stat-card-value">{_avg_t}</div></div>',
+            unsafe_allow_html=True,
+        )
+
     st.divider()
 
+    # ── Controls ─────────────────────────────────────────────────
     show_base = st.checkbox(
-        "Show base-agent technique comparison",
+        "Compare prompting techniques",
         value=False,
-        help="Run all 5 prompting techniques on the BASE agent too and show side-by-side.",
+        help="Run all prompting techniques side-by-side on the base agent.",
     )
 
-    st.divider()
     if st.button("🗑️ Clear conversation", use_container_width=True):
         context_id = str(uuid.uuid4())
         st.session_state.chat_history = []
@@ -316,62 +876,13 @@ with st.sidebar:
             "workflow": {},
             "calendar_sync_requested": False,
         }
+        st.session_state.profile_form_pending = False
         st.rerun()
 
-    st.markdown("---")
-
-    # ── Workflow progress indicator ──────────────────────────────
-    st.markdown("## 📊 Session Status")
-    _workflow = st.session_state.agent_state.get("workflow", {})
-    _stage = _workflow.get("stage", "")
-    _domain = _workflow.get("domain", "")
-    _completed = _workflow.get("completed_steps", [])
-
-    _STAGE_PROGRESS = {
-        "": ("Ready", 0.0),
-        "collect_profile": ("Collecting Profile", 0.25),
-        "confirm_profile": ("Confirming Profile", 0.50),
-        "plan_feedback": ("Reviewing Plan", 0.75),
-        "calendar_sync": ("Calendar Sync", 0.90),
-    }
-    if any(s in _completed for s in ("plan_confirmed", "calendar_sync_yes", "calendar_sync_no")):
-        _stage_label, _progress = "Complete", 1.0
-    else:
-        _stage_label, _progress = _STAGE_PROGRESS.get(_stage, ("In Progress", 0.5))
-
-    st.progress(_progress, text=_stage_label)
-    if _domain:
-        st.caption(f"Domain: **{_domain.title()}**")
-
-    # ── Feedback stats ────────────────────────────────────────────
-    _ctx_id = st.session_state.agent_state.get("context_id", "")
-    _avg_rating = get_average_rating(_ctx_id) if _ctx_id else None
-    if _avg_rating is not None:
-        st.metric("Avg Session Rating", f"{_avg_rating}/5")
-
-    # ── Response time tracking ────────────────────────────────────
-    if "response_times" not in st.session_state:
-        st.session_state.response_times = []
-    if st.session_state.response_times:
-        avg_time = sum(st.session_state.response_times) / len(st.session_state.response_times)
-        st.metric("Avg Response Time", f"{avg_time:.1f}s")
-
-    st.markdown("---")
-
-    # ── Live logs panel ───────────────────────────────────────────
-    with st.expander("🪵 Backend Logs", expanded=False):
-        if _LOG_BUFFER:
-            log_text = "\n".join(list(_LOG_BUFFER)[-120:])  # last 120 lines
-            st.code(log_text, language="text")
-            if st.button("Clear logs", key="clear_logs"):
-                _LOG_BUFFER.clear()
-                st.rerun()
-        else:
-            st.caption("No logs yet — send a message to see backend activity.")
-
-    # ── Google Calendar sidebar ───────────────────────────────────
     st.divider()
-    st.markdown("## 📅 Google Calendar")
+
+    # ── Google Calendar ──────────────────────────────────────────
+    st.markdown("## 📅 Calendar")
 
     _has_google_creds = bool(os.getenv("GOOGLE_CLIENT_ID")) and bool(os.getenv("GOOGLE_CLIENT_SECRET"))
     _wf_state = st.session_state.get("agent_state", {}).get("workflow", {})
@@ -382,18 +893,49 @@ with st.sidebar:
         st.success("✅ Calendar synced!")
     elif _has_google_creds and _calendar_stage == "calendar_oauth_pending":
         try:
-            from agent.tools.calendar_integration import get_authorization_url
+            from agent.tools.calendar_integration import (
+                get_authorization_url, save_oauth_context,
+            )
+            # Generate auth URL (PKCE disabled — no code_verifier to manage).
             _auth_url, _ = get_authorization_url()
-            st.link_button("📅 Connect Google Calendar", _auth_url, use_container_width=True)
-            st.caption("Sign in with Google to push your plan as calendar events.")
-        except Exception as _e:
-            st.caption(f"⚠️ Calendar setup error: {_e}")
-    elif not _has_google_creds:
-        st.caption("Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to .env to enable.")
-    else:
-        st.caption("Complete a plan and say 'yes' to calendar sync to enable.")
 
-    st.caption("Built with LangGraph · LangChain · OpenAI · Streamlit")
+            # Persist plan data to temp file so it survives the OAuth redirect.
+            _oauth_plan_text = _wf_state.get("plan_text", "")
+            _oauth_domain = _wf_state.get("domain", "diet")
+            _oauth_profile = st.session_state.get("agent_state", {}).get("user_profile", {})
+            save_oauth_context(
+                plan_text=_oauth_plan_text,
+                domain=_oauth_domain,
+                profile=_oauth_profile,
+            )
+
+            st.link_button("📅 Connect Google Calendar", _auth_url, use_container_width=True)
+            st.caption("Sign in with Google to sync your plan.")
+        except Exception as _e:
+            st.caption(f"⚠️ Calendar error: {_e}")
+    elif not _has_google_creds:
+        st.caption("Add Google credentials to `.env` to enable calendar sync.")
+    else:
+        st.caption("Generate a plan to enable calendar sync.")
+
+    st.divider()
+
+    # ── Live logs panel ──────────────────────────────────────────
+    with st.expander("🪵 Logs", expanded=False):
+        if _LOG_BUFFER:
+            log_text = "\n".join(list(_LOG_BUFFER)[-80:])
+            st.code(log_text, language="text")
+            if st.button("Clear", key="clear_logs"):
+                _LOG_BUFFER.clear()
+                st.rerun()
+        else:
+            st.caption("No logs yet.")
+
+    st.markdown(
+        '<div style="text-align:center;padding:1rem 0;color:#444;font-size:0.65rem;">'
+        'Built with LangGraph · LangChain · OpenAI · Streamlit</div>',
+        unsafe_allow_html=True,
+    )
 
 # ── Render existing chat history ──────────────────────────────────
 
@@ -414,20 +956,59 @@ for i, entry in enumerate(st.session_state.chat_history):
         else:
             st.markdown(entry["content"])
 
+# ── Profile intake form (shown when workflow is in collect_profile stage) ──
+
+_current_workflow = st.session_state.agent_state.get("workflow", {})
+if _current_workflow.get("stage") == "collect_profile" and st.session_state.profile_form_pending:
+    _form_domain = _current_workflow.get("domain", "diet")
+    _form_existing = st.session_state.agent_state.get("user_profile", {})
+    _form_required = DOMAIN_REQUIRED_FIELDS.get(_form_domain, [])
+    _form_missing = [f for f in _form_required if not _form_existing.get(f)]
+
+    if not _form_missing:
+        # All fields already filled (e.g. switching diet → workout with shared base fields).
+        # Auto-confirm and skip the form entirely.
+        _form_data = dict(_form_existing)
+    else:
+        # Show form for the missing fields only.
+        with st.chat_message("assistant"):
+            _form_data = _render_profile_form(_form_domain, _form_existing)
+
+    if _form_data is not None:
+        st.session_state.profile_form_pending = False
+        # Populate profile from form data
+        st.session_state.agent_state["user_profile"].update(_form_data)
+        # Advance workflow to confirm_profile so the backend skips collection
+        # and treats the next message as a confirmation → generates the plan.
+        _wf = st.session_state.agent_state.get("workflow", {})
+        _wf["stage"] = "confirm_profile"
+        st.session_state.agent_state["workflow"] = _wf
+        # Queue a confirmation message so plan generates immediately.
+        # NOTE: avoid words like "create/make/build/plan" to prevent
+        # handle_multi_turn's stale-profile reset from wiping the form data.
+        st.session_state._pending_form_message = "Yes, I confirm these details."
+        st.rerun()
+
 # ── Chat input ────────────────────────────────────────────────────
 
-prompt = st.chat_input("Ask me anything about fitness, workouts, or nutrition…")
+# Always render chat_input so it never disappears
+chat_input_value = st.chat_input("Ask me anything about fitness, workouts, or nutrition…")
+_pending_form_msg = st.session_state.pop("_pending_form_message", None)
+_quick_prompt = st.session_state.pop("_quick_prompt", None)
+prompt = _pending_form_msg or _quick_prompt or chat_input_value
+
+_is_form_auto_confirm = _pending_form_msg is not None
 
 if prompt:
     turn_id = uuid.uuid4().hex[:8]
     turn_start = perf_counter()
     _ui_logger.info("[Turn %s] Received user prompt: %s", turn_id, prompt)
 
-    # ── Display user message ──────────────────────────────────────
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
+    # ── Display user message (hide synthetic form confirmation) ───
+    if not _is_form_auto_confirm:
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
 
     # ── Append to agent state ─────────────────────────────────────
     st.session_state.agent_state["messages"].append(HumanMessage(content=prompt))
@@ -445,6 +1026,7 @@ if prompt:
         base_results: dict = {}       # comparison across BASE_PROMPTS
         final_event: dict = {}
         tool_direct_reply = False
+        _form_will_render = False   # suppress display when form takes over
 
         try:
           with st.status("Analyzing your request...", expanded=False) as status:
@@ -467,7 +1049,7 @@ if prompt:
                     # Detect @tool call intent (latest message only)
                     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls and not tool_used:
                         tool_used = last_msg.tool_calls[0]["name"]
-                        tool_label, _ = TOOL_LABELS.get(tool_used, ("Specialist", "#333"))
+                        tool_label, _, _ = TOOL_LABELS.get(tool_used, ("Specialist", "", "#333"))
                         status.update(label=f"Routing to {tool_label}...")
                         badge_placeholder.markdown(_badge(tool_used), unsafe_allow_html=True)
                         _ui_logger.info("[Turn %s] Routed to tool=%s", turn_id, tool_used)
@@ -478,10 +1060,17 @@ if prompt:
                         status.update(label="Generating your response...")
                         try:
                             parsed = json.loads(last_msg.content)
+                            # Check if workflow entered collect_profile — form will handle display
+                            _tool_state = parsed.get("state_updates", {})
+                            _tool_wf = _tool_state.get("workflow", {})
+                            if _tool_wf.get("stage") == "collect_profile":
+                                _form_will_render = True
+
                             assistant_message = parsed.get("assistant_message")
                             if assistant_message and assistant_message != response_content:
                                 response_content = assistant_message
-                                response_placeholder.markdown(response_content)
+                                if not _form_will_render:
+                                    response_placeholder.markdown(response_content)
                                 tool_direct_reply = True
                                 _ui_logger.debug(
                                     "[Turn %s] Tool assistant_message received (chars=%d)",
@@ -505,6 +1094,7 @@ if prompt:
                         and not getattr(last_msg, "tool_calls", None)
                         and not isinstance(last_msg, ToolMessage)
                         and not tool_direct_reply
+                        and not _form_will_render
                     ):
                         response_content = last_msg.content
                         response_placeholder.markdown(response_content)
@@ -625,18 +1215,29 @@ if prompt:
             st.session_state.agent_state.get("calendar_sync_requested"),
         )
 
+    # ── Trigger profile form when entering collect_profile stage ──
+    _synced_wf = st.session_state.agent_state.get("workflow", {})
+    if _synced_wf.get("stage") == "collect_profile" and not st.session_state.profile_form_pending:
+        st.session_state.profile_form_pending = True
+        st.rerun()
+    elif _synced_wf.get("stage") != "collect_profile":
+        st.session_state.profile_form_pending = False
+
     # ── Persist to display history ────────────────────────────────
-    assistant_entry = {
-        "role": "assistant",
-        "content": response_content,
-        "tool_used": tool_used or "",
-        "technique_results": technique_results,
-        "base_results": base_results,
-    }
-    if not (
-        st.session_state.chat_history
-        and st.session_state.chat_history[-1].get("role") == "assistant"
-        and st.session_state.chat_history[-1].get("content") == response_content
-    ):
-        st.session_state.chat_history.append(assistant_entry)
+    # Skip persisting when the form will take over (profile questions
+    # are handled by the form widget, not the chat history).
+    if not _form_will_render:
+        assistant_entry = {
+            "role": "assistant",
+            "content": response_content,
+            "tool_used": tool_used or "",
+            "technique_results": technique_results,
+            "base_results": base_results,
+        }
+        if not (
+            st.session_state.chat_history
+            and st.session_state.chat_history[-1].get("role") == "assistant"
+            and st.session_state.chat_history[-1].get("content") == response_content
+        ):
+            st.session_state.chat_history.append(assistant_entry)
     _ui_logger.info("[Turn %s] Assistant response persisted to history", turn_id)

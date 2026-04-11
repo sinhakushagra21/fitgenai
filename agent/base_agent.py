@@ -40,6 +40,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.messages import ToolMessage
 from langchain_openai import ChatOpenAI
 
+from agent.tracing import get_langsmith_config
 from agent.prompts.base_prompts import (
     BASE_ANALOGICAL,
     BASE_COT,
@@ -140,7 +141,21 @@ def make_base_agent(prompt_key: str = "zero_shot"):
         ):
             domain = workflow.get("domain")
             tool_name = "diet_tool" if domain == "diet" else "workout_tool" if domain == "workout" else None
-            if tool_name:
+
+            # ── Cross-domain switch detection ──────────────────────
+            # If the user explicitly mentions the OTHER domain, do NOT
+            # force-route to the current domain's tool.  Let the LLM
+            # decide the correct tool so the domain can switch.
+            # Example: active domain = workout, user says "create a
+            # diet plan" → should go to diet_tool, not workout_tool.
+            _user_lower = last_user.lower()
+            _other_domain_requested = False
+            if domain == "workout" and any(kw in _user_lower for kw in ["diet", "meal", "nutrition", "food", "calorie"]):
+                _other_domain_requested = True
+            elif domain == "diet" and any(kw in _user_lower for kw in ["workout", "exercise", "training", "gym", "lifting"]):
+                _other_domain_requested = True
+
+            if tool_name and not _other_domain_requested:
                 logger.info("[BaseAgent:%s] 🔁 Active workflow detected; force route → %s", prompt_key, tool_name)
                 forced_call = AIMessage(
                     content="",
@@ -154,16 +169,38 @@ def make_base_agent(prompt_key: str = "zero_shot"):
                     ],
                 )
                 return {"messages": [forced_call]}
+            elif _other_domain_requested:
+                logger.info(
+                    "[BaseAgent:%s] 🔀 Cross-domain switch detected (active=%s, user wants other); "
+                    "skipping force-route, letting LLM decide",
+                    prompt_key, domain,
+                )
 
-        from agent.config import DEFAULT_MODEL
+        from agent.config import FAST_MODEL
         from agent.llm_utils import safe_llm_call
+        import json as _json
 
-        llm = ChatOpenAI(model=DEFAULT_MODEL, temperature=0.7)
+        # Sanitize message history: trim large ToolMessage JSON to just the
+        # user-facing text so the LLM context stays small and valid.
+        _sanitized: list = [SystemMessage(content=system_prompt)]
+        for _m in state["messages"]:
+            if isinstance(_m, ToolMessage) and _m.content:
+                try:
+                    _parsed = _json.loads(_m.content)
+                    _short = _parsed.get("assistant_message", _m.content[:500])
+                    _sanitized.append(ToolMessage(content=_short, tool_call_id=_m.tool_call_id))
+                except (ValueError, TypeError):
+                    _sanitized.append(ToolMessage(content=_m.content[:500], tool_call_id=_m.tool_call_id))
+            else:
+                _sanitized.append(_m)
+
+        llm = ChatOpenAI(model=FAST_MODEL, temperature=0.7)
         llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
         response = safe_llm_call(
             llm_with_tools,
-            [SystemMessage(content=system_prompt)] + state["messages"],
+            _sanitized,
+            config=get_langsmith_config("Base Agent Routing", tags=["base_agent", prompt_key]),
         )
 
         if getattr(response, "tool_calls", None):
@@ -182,7 +219,7 @@ def make_base_agent(prompt_key: str = "zero_shot"):
     return _node
 
 
-# ── Default node (zero-shot) ──────────────────────────────────────
+# ── Default node (few-shot) ───────────────────────────────────────
 # graph.py imports this directly; swap to make_base_agent("cot") etc.
 # to change the base agent's prompting technique globally.
 base_agent = make_base_agent("few_shot")

@@ -17,21 +17,42 @@ from agent.persistence import init_db
 
 @pytest.fixture
 def sample_user_profile() -> dict:
-    """Complete 13-field user profile."""
+    """Complete user profile with all diet + workout fields."""
     return {
+        # Stats
         "name": "Test User",
         "age": 25,
         "sex": "male",
         "height_cm": 180.0,
         "weight_kg": 80.0,
-        "goal": "muscle gain",
-        "activity_level": "moderate",
+        "goal": "fat loss",
+        "goal_weight": "72",
+        "weight_loss_pace": "steady & sustainable",
+        # Lifestyle
+        "job_type": "desk job",
+        "exercise_frequency": "3-4 times",
+        "exercise_type": "weights and running",
+        "sleep_hours": 7,
+        "stress_level": "moderate",
+        "alcohol_intake": "4 beers per week",
+        # Food Preferences
         "diet_preference": "omnivore",
+        "favourite_meals": "Chicken tikka masala, Pasta carbonara, Steak and chips, Sushi, Thai green curry",
         "foods_to_avoid": "none",
         "allergies": "none",
+        "cooking_style": "mix of all",
+        "food_adventurousness": 7,
+        # Snack Habits
+        "current_snacks": "crisps, chocolate bars, biscuits",
+        "snack_reason": "boredom",
+        "snack_preference": "both",
+        "late_night_snacking": "sometimes",
+        # Workout-specific
+        "activity_level": "moderate",
         "fitness_level": "intermediate",
         "equipment": "full gym",
         "workout_days": 5,
+        "additional_info": "none",
     }
 
 

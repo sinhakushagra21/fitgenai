@@ -18,6 +18,7 @@ from langgraph.prebuilt import InjectedState
 
 from agent.prompts.diet_prompts import DIET_PROMPTS
 from agent.tools.conversation_workflow import execute
+from agent.tracing import trace
 
 logger = logging.getLogger("fitgen.diet_tool")
 
@@ -31,6 +32,7 @@ def _get_raw_user_query(state: dict[str, Any]) -> str:
 
 
 @tool
+@trace(name="Diet Tool", run_type="tool", tags=["diet", "tool"])
 def diet_tool(query: str, state: Annotated[dict[str, Any], InjectedState]) -> str:
     """Multi-turn diet agent with create/modify/delete workflow and SQL persistence.
 

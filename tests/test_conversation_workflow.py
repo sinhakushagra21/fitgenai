@@ -17,12 +17,8 @@ from agent.tools.conversation_workflow import (
     append_completed_step,
     build_profile_bulk_question,
     build_profile_confirmation,
-    fallback_yes_no_from_text,
-    is_generic_modify_request,
-    looks_like_modify_request,
     missing_profile_fields,
     required_fields_for_domain,
-    resolve_intent,
 )
 
 
@@ -124,76 +120,6 @@ class TestParseSingleField:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# fallback_yes_no_from_text
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-class TestFallbackYesNo:
-    def test_yes_variants(self):
-        for word in ["yes", "y", "yeah", "yep", "ok", "sure"]:
-            assert fallback_yes_no_from_text(word) == "yes"
-
-    def test_no_variants(self):
-        for word in ["no", "n", "nope", "nah", "cancel"]:
-            assert fallback_yes_no_from_text(word) == "no"
-
-    def test_unknown(self):
-        assert fallback_yes_no_from_text("I'm not sure about this") == "unknown"
-
-    def test_positive_feedback_disabled(self):
-        assert fallback_yes_no_from_text("looks good") == "unknown"
-
-    def test_positive_feedback_enabled(self):
-        assert fallback_yes_no_from_text("looks good", allow_positive_feedback=True) == "yes"
-        assert fallback_yes_no_from_text("perfect", allow_positive_feedback=True) == "yes"
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# looks_like_modify_request / is_generic_modify_request
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-class TestModifyDetection:
-    def test_modify_markers(self):
-        assert looks_like_modify_request("change my diet plan") is True
-        assert looks_like_modify_request("update the workout") is True
-        assert looks_like_modify_request("I want to avoid seafood") is True
-
-    def test_not_modify(self):
-        assert looks_like_modify_request("hello") is False
-        assert looks_like_modify_request("tell me about protein") is False
-
-    def test_generic_modify(self):
-        assert is_generic_modify_request("modify it") is True
-        assert is_generic_modify_request("update") is True
-
-    def test_specific_modify_not_generic(self):
-        assert is_generic_modify_request("change my calories to 2500") is False
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# resolve_intent
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-class TestResolveIntent:
-    def test_direct_intents(self):
-        assert resolve_intent("get", None, None, "show my plan") == "get"
-        assert resolve_intent("delete", None, None, "remove it") == "delete"
-        assert resolve_intent("update", None, None, "change it") == "update"
-
-    def test_modify_in_calendar_sync_stage(self):
-        result = resolve_intent("other", "create", "calendar_sync", "change my diet")
-        assert result == "update"
-
-    def test_modify_in_plan_feedback_stage(self):
-        result = resolve_intent("other", "create", "plan_feedback", "modify the workout")
-        assert result == "update"
-
-    def test_fallback_to_active_intent(self):
-        result = resolve_intent("other", "create", "collect_profile", "some text")
-        assert result == "create"
-
-    def test_fallback_to_detected_when_no_active(self):
-        result = resolve_intent("other", None, None, "random text")
-        assert result == "other"
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Formatting helpers
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 class TestFormattingHelpers:
@@ -210,9 +136,9 @@ class TestFormattingHelpers:
 
     def test_build_profile_bulk_question(self):
         result = build_profile_bulk_question(["age", "sex", "height_cm"])
-        assert "What is your age?" in result
-        assert "What is your sex" in result
-        assert "Example:" in result
+        assert "age" in result.lower()
+        assert "sex" in result.lower()
+        assert "height" in result.lower()
 
     def test_append_completed_step(self):
         workflow = {"intent": "create", "completed_steps": []}

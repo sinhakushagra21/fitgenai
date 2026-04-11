@@ -18,6 +18,7 @@ from langgraph.prebuilt import InjectedState
 
 from agent.prompts.workout_prompts import WORKOUT_PROMPTS
 from agent.tools.conversation_workflow import execute
+from agent.tracing import trace
 
 logger = logging.getLogger("fitgen.workout_tool")
 
@@ -31,6 +32,7 @@ def _get_raw_user_query(state: dict[str, Any]) -> str:
 
 
 @tool
+@trace(name="Workout Tool", run_type="tool", tags=["workout", "tool"])
 def workout_tool(query: str, state: Annotated[dict[str, Any], InjectedState]) -> str:
     """Multi-turn workout agent with create/modify/delete workflow and SQL persistence.
 
@@ -63,5 +65,5 @@ def workout_tool(query: str, state: Annotated[dict[str, Any], InjectedState]) ->
         domain="workout",
         query=effective_query,
         state=state,
-        plan_system_prompt=WORKOUT_PROMPTS["cot"],
+        plan_system_prompt=WORKOUT_PROMPTS["few_shot"],
     )

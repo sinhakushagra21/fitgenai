@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from google.oauth2.credentials import Credentials
@@ -25,9 +27,55 @@ from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger("fitgen.calendar")
 
-_LLM_MODEL = os.getenv("FITGEN_LLM_MODEL", "gpt-4.1")
+from agent.config import FAST_MODEL
+
+_LLM_MODEL = FAST_MODEL
 _SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 _REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8501")
+
+# ── Plan data persistence for OAuth redirect ────────────────────
+# Streamlit session state is LOST when the browser navigates away to
+# Google OAuth and back.  We persist plan data (plan_text, domain,
+# profile) to a JSON file so the callback can extract calendar events
+# even after the session state is wiped.
+#
+# PKCE is DISABLED (autogenerate_code_verifier=False) so we don't need
+# to persist a code_verifier at all — eliminating the main source of bugs.
+_OAUTH_CONTEXT_FILE = Path(tempfile.gettempdir()) / "fitgen_oauth_context.json"
+
+
+def save_oauth_context(
+    plan_text: str = "",
+    domain: str = "diet",
+    profile: dict[str, Any] | None = None,
+) -> None:
+    """Persist plan data to a temp file before the OAuth redirect."""
+    data = {
+        "plan_text": plan_text,
+        "domain": domain,
+        "profile": profile or {},
+    }
+    _OAUTH_CONTEXT_FILE.write_text(json.dumps(data), encoding="utf-8")
+    logger.info("[Calendar] Saved plan context to %s", _OAUTH_CONTEXT_FILE)
+
+
+def load_oauth_context() -> dict[str, Any]:
+    """Load plan data from temp file (does NOT delete — idempotent reads)."""
+    if _OAUTH_CONTEXT_FILE.exists():
+        try:
+            data = json.loads(_OAUTH_CONTEXT_FILE.read_text(encoding="utf-8"))
+            logger.info("[Calendar] Loaded plan context: plan_len=%d, domain=%s",
+                        len(data.get("plan_text", "")), data.get("domain", "?"))
+            return data
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("[Calendar] Failed to load plan context: %s", e)
+    return {}
+
+
+def clear_oauth_context() -> None:
+    """Delete the context file after successful calendar sync."""
+    _OAUTH_CONTEXT_FILE.unlink(missing_ok=True)
+    logger.debug("[Calendar] Cleared plan context file")
 
 
 # ── OAuth 2.0 helpers ────────────────────────────────────────────
@@ -54,7 +102,7 @@ def _get_client_config() -> dict[str, Any]:
 
 
 def get_authorization_url() -> tuple[str, str]:
-    """Generate the Google OAuth consent URL.
+    """Generate the Google OAuth consent URL (PKCE disabled).
 
     Returns
     -------
@@ -65,12 +113,14 @@ def get_authorization_url() -> tuple[str, str]:
         _get_client_config(),
         scopes=_SCOPES,
         redirect_uri=_REDIRECT_URI,
+        autogenerate_code_verifier=False,  # ← disable PKCE
     )
     authorization_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
     )
+    logger.info("[Calendar] Generated OAuth URL (PKCE disabled)")
     return authorization_url, state
 
 
@@ -91,9 +141,12 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
         _get_client_config(),
         scopes=_SCOPES,
         redirect_uri=_REDIRECT_URI,
+        autogenerate_code_verifier=False,  # ← must match get_authorization_url
     )
     flow.fetch_token(code=code)
     creds = flow.credentials
+    logger.info("[Calendar] Token exchange successful")
+
     return {
         "token": creds.token,
         "refresh_token": creds.refresh_token,

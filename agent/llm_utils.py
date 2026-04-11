@@ -21,6 +21,7 @@ def safe_llm_call(
     *,
     retries: int = 2,
     timeout: float = 60.0,
+    config: dict | None = None,
 ) -> Any:
     """Invoke an LLM with retry logic for transient API errors.
 
@@ -35,6 +36,8 @@ def safe_llm_call(
     last_exc: Exception | None = None
     for attempt in range(1, retries + 2):  # retries + 1 total attempts
         try:
+            if config:
+                return llm.invoke(messages, config=config)
             return llm.invoke(messages)
         except openai.RateLimitError as e:
             last_exc = e

@@ -26,12 +26,13 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from agent.rag.retriever import retrieve, format_context
+from agent.tracing import trace, get_langsmith_config
 
 logger = logging.getLogger("fitgen.rag_tool")
 
-from agent.config import DEFAULT_MODEL
+from agent.config import FAST_MODEL
 
-MODEL = DEFAULT_MODEL
+MODEL = FAST_MODEL
 
 _RAG_SYSTEM_PROMPT = """You are FITGEN.AI, an expert fitness and nutrition coach powered by
 Retrieval-Augmented Generation (RAG).
@@ -53,6 +54,7 @@ INSTRUCTIONS:
 
 
 @tool
+@trace(name="RAG Query Tool", run_type="tool", tags=["rag", "retrieval"])
 def rag_query_tool(query: str) -> str:
     """Answer a fitness or nutrition question using RAG (Retrieval-Augmented Generation).
 
@@ -85,10 +87,10 @@ def rag_query_tool(query: str) -> str:
 
     # 3. Generate response
     llm = ChatOpenAI(model=MODEL, temperature=0.3)
-    response = llm.invoke([
-        SystemMessage(content=system),
-        HumanMessage(content=query),
-    ])
+    response = llm.invoke(
+        [SystemMessage(content=system), HumanMessage(content=query)],
+        config=get_langsmith_config("RAG Response Generation", tags=["rag"]),
+    )
 
     elapsed = time.perf_counter() - t0
     logger.info("[RAGTool] Response generated in %.2fs", elapsed)
