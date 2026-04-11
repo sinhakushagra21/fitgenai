@@ -30,7 +30,11 @@ logger = logging.getLogger("fitgen.calendar")
 from agent.config import FAST_MODEL
 
 _LLM_MODEL = FAST_MODEL
-_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/fitness.nutrition.write",
+    "https://www.googleapis.com/auth/fitness.activity.write",
+]
 _REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8501")
 
 # ── Plan data persistence for OAuth redirect ────────────────────
@@ -48,12 +52,17 @@ def save_oauth_context(
     plan_text: str = "",
     domain: str = "diet",
     profile: dict[str, Any] | None = None,
+    sync_target: str = "calendar",
 ) -> None:
-    """Persist plan data to a temp file before the OAuth redirect."""
+    """Persist plan data to a temp file before the OAuth redirect.
+
+    sync_target: "calendar", "google_fit", or "both"
+    """
     data = {
         "plan_text": plan_text,
         "domain": domain,
         "profile": profile or {},
+        "sync_target": sync_target,
     }
     _OAUTH_CONTEXT_FILE.write_text(json.dumps(data), encoding="utf-8")
     logger.info("[Calendar] Saved plan context to %s", _OAUTH_CONTEXT_FILE)

@@ -284,24 +284,56 @@ DIET_FEW_SHOT = (
 # Technique: Few-Shot Prompting
 
 Study the examples below. Your response MUST mirror their STRUCTURE \
-exactly. Do NOT deviate from this format. Do NOT produce a response \
-that looks different from the examples.
+exactly — all 8 sections, in order. Do NOT deviate from this format. \
+Do NOT produce a response that looks different from the examples.
 
-## Required Output Structure (in this exact order)
-1. **Macro Summary Table** — calories, protein, carbs, fats, fibre, \
-   water. Include macro check row.
-2. **Top Food Sources Table** — 5 foods with columns: Food, Serving \
-   (grams + household measure), Kcal, Protein.
-3. **Sample Day Table** — one markdown table with columns: Meal, Foods, \
-   Kcal, Protein. Use emoji icons per meal type. Include a bold \
-   **TOTAL** row at the bottom. List actual food items with gram weights \
-   AND household equivalents in the Foods column. Follow the table with \
-   the meal total check line.
-4. **Arithmetic Verification** — macro check + meal total check (both \
-   shown explicitly with the formula and checkmark)
-5. **Key Micronutrient Notes** — brief notes on fibre, iron, calcium, \
-   vitamin D if relevant to the user's diet.
-6. **Disclaimer**
+## Required Output Structure — 8 Sections (in this exact order)
+
+1. **CALORIE CALCULATION** — Full Mifflin-St Jeor breakdown with \
+   calculator warning and 2-week tracking recommendation. Show BMR, \
+   activity multiplier selection (combining job_type AND exercise), \
+   TDEE, and deficit/surplus applied. Step-by-step arithmetic.
+
+2. **MACRO TARGETS** — Daily protein, carbs, fat in grams with plain \
+   English explanations of why each target is set. Include a macro \
+   summary table and macro check row: \
+   (protein_g x 4) + (carbs_g x 4) + (fat_g x 9) = total kcal +/- 20.
+
+3. **7-DAY MEAL PLAN** — Monday through Sunday. Each day has:
+   - A fun theme title (e.g. "Mediterranean Monday", "Tex-Mex Tuesday")
+   - Breakfast, lunch, dinner, optional dessert
+   - Calorie and macro counts for EVERY meal
+   - Flag batch-cook-friendly meals with a cooking emoji
+   - At least 2 meals across the week that feel like treats but are \
+     secretly low-cal (mark with a celebration emoji)
+   - If user drinks alcohol, factor calories into relevant days
+   - Use the user's `favourite_meals` and `cooking_style` as inspiration
+   - NO boring chicken-and-broccoli unless specifically requested
+   - Gram weights AND household equivalents for portions
+   - Daily total row at the bottom of each day's table
+
+4. **SNACK SWAPS** — For EACH of the user's `current_snacks`, suggest \
+   a healthier alternative that scratches the same itch. Sweet for \
+   sweet, crunchy for crunchy, salty for salty. At least 5 options with \
+   calorie comparison (old vs new).
+
+5. **5 PERSONAL FAT LOSS RULES** — Specific to THIS user based on \
+   their profile. Not generic. Address their specific challenges \
+   (alcohol, late-night snacking, stress eating, desk job, etc.).
+
+6. **REALISTIC TIMELINE** — Honest week-by-week / month-by-month \
+   projection based on their deficit and current weight. Encouraging \
+   but no false promises. Include expected milestones.
+
+7. **HYDRATION TARGET** — Daily litres with full calculation \
+   (35ml/kg + exercise + job adjustments). 3-4 practical tips specific \
+   to their lifestyle. Explain the fat loss connection (hunger cues, \
+   metabolism, performance).
+
+8. **SUPPLEMENT RECOMMENDATIONS** — Only evidence-backed supplements. \
+   For each: dose, best time to take, why it's relevant to THIS user, \
+   budget-friendly pick. Always note: supplements are the 1%, \
+   food/training/sleep are the other 99%.
 
 ## Format Rules
 - Macro math MUST reconcile: (protein_g x 4) + (carbs_g x 4) + \
@@ -310,14 +342,15 @@ that looks different from the examples.
   the user's goal.
 - Each meal must show individual calorie and protein contribution.
 - Daily meal calories must sum to stated target +/- 20 kcal.
-- Fibre and hydration targets must appear in macro table.
+- Use markdown tables for meal plans, macros, snack swaps.
+- Include gram weights AND household equivalents for portions.
 - NEVER include foods from `allergies` or `foods_to_avoid` profile fields.
 - ALWAYS respect `diet_preference`.
 - ONE response only. Stop after the disclaimer.
 
 <examples>
 
-<example id="1" category="structured_profile_fat_loss">
+<example id="1" category="full_8_section_fat_loss">
 <user_message>Create a personalized diet plan using this profile:
 {
   "name": "Raj",
@@ -326,54 +359,248 @@ that looks different from the examples.
   "height_cm": 178,
   "weight_kg": 82,
   "goal": "fat loss",
-  "activity_level": "moderate",
+  "goal_weight": 74,
+  "weight_loss_pace": "moderate",
+  "job_type": "desk job",
+  "exercise_frequency": "4x/week",
+  "exercise_type": "weight training + cardio",
+  "sleep_hours": 7,
+  "stress_level": "moderate",
+  "alcohol_intake": "weekends only (2-3 beers)",
   "diet_preference": "omnivore",
+  "favourite_meals": "butter chicken, eggs, steak, pasta",
   "foods_to_avoid": "beef",
-  "allergies": "none"
+  "allergies": "none",
+  "cooking_style": "quick and simple",
+  "food_adventurousness": 6,
+  "current_snacks": "chips, chocolate, biscuits",
+  "snack_reason": "boredom and stress",
+  "snack_preference": "crunchy and salty",
+  "late_night_snacking": "yes, 2-3 times a week"
 }</user_message>
 <ideal_response>
-**Macro Summary — Fat Loss (Raj, 29M, 82 kg, Moderately Active)**
+## 1. CALORIE CALCULATION
 
-| Metric        | Daily Target                                  |
-|---------------|-----------------------------------------------|
-| Calories      | 2,280 kcal (TDEE ~2,680 - 400 deficit)       |
-| Protein       | 164 g (2.0 g/kg) -> 656 kcal                 |
-| Carbohydrates | 228 g (40%) -> 912 kcal                      |
-| Fats          | 79 g (~31%) -> 711 kcal                      |
-| Fibre         | 30-38 g                                       |
-| Water         | 2.7-3.5 L/day                                 |
+> **Important:** Generic online calorie calculators are notoriously \
+inaccurate, especially for people with physical jobs or high activity \
+levels. The most accurate method is tracking your intake for 2 weeks \
+while your weight is stable — that number IS your maintenance. The \
+numbers below are a solid starting point, but adjust after 2 weeks \
+based on real results.
 
-*Macro check: (164x4) + (228x4) + (79x9) = 656 + 912 + 711 = 2,279 kcal (target: 2,280) checkmark*
+**BMR (Mifflin-St Jeor — Male):**
+(10 x 82) + (6.25 x 178) - (5 x 29) + 5
+= 820 + 1,112.5 - 145 + 5
+= **1,792 kcal**
 
-**Top Protein Sources for Fat Loss**
+**Activity Multiplier:** Desk job + 4x/week weight training & cardio \
+= Moderately Active → **1.55**
 
-| Food                        | Serving              | Kcal | Protein |
-|-----------------------------|----------------------|------|---------|
-| Chicken breast (cooked)     | 150 g (~1 palm)      | 248  | 46 g    |
-| Greek yogurt (0% fat)       | 200 g (~3/4 cup)     | 120  | 20 g    |
-| Eggs (whole)                | 2 large              | 140  | 12 g    |
-| Canned tuna in water        | 120 g (~1 small can) | 132  | 29 g    |
-| Cottage cheese (low-fat)    | 150 g (~2/3 cup)     | 123  | 16 g    |
+**TDEE:** 1,792 x 1.55 = **2,778 kcal**
 
-*Note: No beef included per user preference.*
+**Target (fat loss):** 2,778 - 500 = **~2,280 kcal/day**
+(500 kcal deficit → ~0.45 kg/week fat loss)
 
-**Sample Day ~ 2,280 kcal / 164 g protein**
+---
+
+## 2. MACRO TARGETS
+
+| Metric        | Daily Target | Why |
+|---------------|-------------|-----|
+| Calories      | 2,280 kcal | 500 kcal deficit for steady fat loss |
+| Protein       | 164 g (2.0 g/kg) → 656 kcal | High protein preserves muscle in a deficit and keeps you full |
+| Carbohydrates | 228 g → 912 kcal | Fuels your 4x/week training sessions |
+| Fats          | 79 g → 711 kcal | Supports hormones and joint health |
+| Fibre         | 30-38 g | Keeps digestion smooth and hunger in check |
+
+*Macro check: (164x4) + (228x4) + (79x9) = 656 + 912 + 711 = 2,279 kcal (target: 2,280) ✓*
+
+---
+
+## 3. 7-DAY MEAL PLAN
+
+### Monday — "Protein Power Monday"
 
 | Meal | Foods | Kcal | Protein |
 |------|-------|------|---------|
 | Breakfast | 3 scrambled eggs, 2 slices wholegrain toast (~60 g), 150 g Greek yogurt (~3/4 cup) | 500 | 38 g |
-| Lunch | 150 g grilled chicken breast (~1 palm), 150 g brown rice cooked (~3/4 cup), large mixed salad, 1 tbsp olive oil dressing | 620 | 48 g |
-| Pre/Post-Workout | 1 whey protein shake (30 g scoop), 1 medium banana (~120 g) | 300 | 30 g |
-| Dinner | 150 g salmon fillet (~1 palm), 200 g roasted sweet potato (~1 medium), 200 g steamed broccoli (~2 cups), 1 tsp olive oil | 680 | 38 g |
-| Evening Snack | 150 g cottage cheese (~2/3 cup), 10 g mixed nuts (~small pinch) | 180 | 10 g |
+| Lunch | 150 g grilled chicken breast (~1 palm), 150 g brown rice (~3/4 cup cooked), large mixed salad, 1 tbsp olive oil | 620 | 48 g |
+| Dinner | Healthier Butter Chicken: 150 g chicken thigh (~1 palm) in light yogurt-tomato sauce, 120 g basmati rice (~1/2 cup cooked), side salad | 680 | 42 g |
+| Snack | 150 g cottage cheese (~2/3 cup), 30 g air-popped popcorn (~2 cups) | 280 | 22 g |
+| Evening | 1 whey protein shake (30 g scoop) with water, 10 g dark chocolate (~2 squares) | 200 | 14 g |
 | **TOTAL** | | **2,280** | **164 g** |
 
-*Meal total check: 500 + 620 + 300 + 680 + 180 = 2,280 kcal checkmark*
+### Tuesday — "Tex-Mex Tuesday"
 
-**Micronutrient Notes**
-- Fibre: ~32 g from whole grains, vegetables, and legumes.
-- Hydration: Aim for 2.7-3.5 L/day, more on training days.
-- Sodium: Moderate from whole foods; no need for supplementation.
+| Meal | Foods | Kcal | Protein |
+|------|-------|------|---------|
+| Breakfast | 2-egg omelette with 30 g cheese (~1 slice), peppers, onions, 1 wholegrain wrap | 450 | 32 g |
+| Lunch | Chicken burrito bowl: 150 g chicken (~1 palm), 100 g black beans (~1/2 cup), 100 g rice (~1/2 cup), salsa, 30 g guac (~2 tbsp) | 650 | 50 g |
+| Dinner | 150 g turkey mince (~1 palm) taco lettuce wraps, 100 g pinto beans (~1/2 cup), salad, lime dressing | 600 | 44 g |
+| Snack | 40 g roasted chickpeas (~1/3 cup), 1 medium apple | 230 | 10 g |
+| Evening | 150 g Greek yogurt (~3/4 cup) with 15 g honey (~1 tbsp) | 150 | 14 g |
+| **TOTAL** | | **2,080** | **150 g** |
+
+*(Saturday includes 2 light beers at ~200 kcal — dinner adjusted \
+down to compensate. See Saturday below.)*
+
+### Wednesday — "Mediterranean Wednesday"
+
+| Meal | Foods | Kcal | Protein |
+|------|-------|------|---------|
+| Breakfast | 80 g oats (~1 cup dry) with milk, 1 banana, 15 g almonds (~12 almonds) | 480 | 18 g |
+| Lunch | 150 g grilled salmon (~1 palm), 200 g roasted sweet potato (~1 medium), 150 g steamed broccoli (~1.5 cups) 🍳 | 620 | 44 g |
+| Dinner | Whole wheat pasta (80 g dry) with turkey meatballs (120 g mince), marinara sauce, side salad | 680 | 48 g |
+| Snack | 30 g mixed nuts (~small handful), 1 rice cake with 1 tbsp almond butter | 260 | 10 g |
+| Evening | Casein shake (30 g scoop) with water | 240 | 44 g |
+| **TOTAL** | | **2,280** | **164 g** |
+
+### Thursday — "Asian Fusion Thursday"
+
+| Meal | Foods | Kcal | Protein |
+|------|-------|------|---------|
+| Breakfast | Protein smoothie: 30 g whey, 200 ml milk, 1 banana, 20 g oats, 10 g peanut butter | 480 | 36 g |
+| Lunch | Chicken stir-fry (150 g chicken, 200 g mixed veg), 150 g jasmine rice (~3/4 cup cooked), 1 tsp sesame oil | 620 | 46 g |
+| Dinner | 150 g prawn (~1 cup) pad thai with 80 g rice noodles, vegetables, lime, 1 tbsp fish sauce | 580 | 38 g |
+| Snack | 2 boiled eggs, 100 g cucumber (~1/2 cucumber) with hummus (30 g, ~2 tbsp) | 280 | 18 g |
+| Evening | 150 g cottage cheese (~2/3 cup), 5 g cinnamon | 180 | 18 g |
+| **TOTAL** | | **2,140** | **156 g** |
+
+### Friday — "Comfort Food Friday" 🎉
+
+| Meal | Foods | Kcal | Protein |
+|------|-------|------|---------|
+| Breakfast | 2 poached eggs on 2 slices sourdough (~60 g), 50 g smoked salmon (~2 slices), avocado (30 g, ~1/4 small) | 520 | 36 g |
+| Lunch | Homemade chicken Caesar salad: 150 g chicken (~1 palm), romaine, 20 g parmesan, light dressing, 1 wholegrain crouton portion 🎉 | 550 | 48 g |
+| Dinner | Healthier "Fakeaway" pasta: 80 g penne, 150 g lean turkey ragu, roasted veg, side salad 🍳 | 650 | 44 g |
+| Snack | Protein ice cream (150 g, ~1 scoop) 🎉 | 180 | 16 g |
+| Evening | 30 g almonds (~23 almonds), herbal tea | 180 | 6 g |
+| **TOTAL** | | **2,080** | **150 g** |
+
+### Saturday — "Weekend Flex Saturday" (alcohol day)
+
+| Meal | Foods | Kcal | Protein |
+|------|-------|------|---------|
+| Breakfast | 3 scrambled eggs, 2 turkey rashers (~40 g), 1 slice toast, grilled tomato | 450 | 38 g |
+| Lunch | Large chicken & avocado wrap: 150 g chicken, 40 g avocado (~1/3 small), salad, wholegrain wrap | 550 | 42 g |
+| Dinner | 150 g grilled chicken thigh (~1 palm), 200 g roasted vegetables, small side salad (lighter to fit beers) | 480 | 40 g |
+| Beers | 2 light beers | 200 | 0 g |
+| Snack | 100 g watermelon (~1 cup), 100 g cottage cheese | 120 | 12 g |
+| Evening | 1 whey protein shake (30 g scoop) | 120 | 25 g |
+| **TOTAL** | | **1,920** | **157 g** |
+
+*(Weekend day is slightly lower to accommodate alcohol. Weekly average \
+stays on target.)*
+
+### Sunday — "Meal Prep Sunday" 🍳
+
+| Meal | Foods | Kcal | Protein |
+|------|-------|------|---------|
+| Breakfast | Protein pancakes: 30 g whey, 1 egg, 40 g oats, 100 g banana | 420 | 34 g |
+| Lunch | 150 g grilled lamb chops (~2 small), 200 g roasted sweet potato (~1 medium), 150 g green beans (~1.5 cups) 🍳 | 680 | 46 g |
+| Dinner | Egg fried rice: 3 eggs, 150 g cooked rice (~3/4 cup), 100 g mixed vegetables, 1 tsp sesame oil 🍳 | 580 | 32 g |
+| Snack | Protein bar (~60 g) | 220 | 20 g |
+| Evening | 200 g Greek yogurt (~1 cup) with 10 g honey, 10 g walnuts | 230 | 20 g |
+| **TOTAL** | | **2,130** | **152 g** |
+
+*Weekly average: ~2,170 kcal/day — within target range. Higher on \
+training days, lower on rest/alcohol days.*
+
+---
+
+## 4. SNACK SWAPS
+
+Your current snacks are driven by **boredom and stress** and you prefer \
+**crunchy and salty**. Here are swaps that scratch the same itch:
+
+| Current Snack | Calories | Swap | Calories | Why It Works |
+|---------------|----------|------|----------|--------------|
+| Chips (50 g bag) | ~270 kcal | Air-popped popcorn (30 g, ~3 cups) with salt & paprika | ~110 kcal | Same crunch, same salt, fraction of the calories |
+| Chocolate bar (~50 g) | ~250 kcal | 20 g dark chocolate (85%+, ~4 squares) + 5 strawberries | ~130 kcal | Satisfies the sweet hit with less sugar |
+| Biscuits (3 digestives) | ~210 kcal | 2 rice cakes with 1 tbsp peanut butter + cinnamon | ~160 kcal | Crunchy + satisfying fats to keep you full |
+| Late-night chips run | ~400 kcal | 40 g roasted chickpeas (~1/3 cup) with cumin + salt | ~160 kcal | Crunchy, salty, high-protein — kills the craving |
+| Boredom biscuit | ~70 kcal each | 100 g cucumber (~1/2) + 30 g hummus | ~80 kcal | Crunchy volume food — you can eat loads for nothing |
+
+---
+
+## 5. 5 PERSONAL FAT LOSS RULES (for Raj)
+
+1. **The "Boredom Buffer" Rule:** When you reach for snacks out of \
+   boredom at your desk, drink 500 ml water and wait 15 minutes. If \
+   you're still hungry, grab one of the swaps above. You're not hungry \
+   — you're bored.
+
+2. **The Weekend Beer Rule:** Stick to 2 light beers max. Eat a \
+   high-protein, lower-carb dinner on drinking nights to create room. \
+   Never drink on an empty stomach (it increases appetite).
+
+3. **The Late-Night Kitchen Curfew:** Kitchen closes after your evening \
+   snack. Brush your teeth. The 2-3x/week late-night snacking is \
+   adding 400-800 kcal/week you don't need.
+
+4. **The Batch Cook Sunday:** Prep Monday-Wednesday lunches and 2 \
+   dinners every Sunday. When food is ready, you won't default to \
+   takeaway. Meals marked 🍳 are batch-cook friendly.
+
+5. **The Stress Swap:** When stress hits at work, do a 5-minute walk \
+   instead of reaching for biscuits. Cortisol drops, cravings fade, \
+   and you don't blow 300 kcal on autopilot.
+
+---
+
+## 6. REALISTIC TIMELINE
+
+| Timeframe | Expected Progress |
+|-----------|-------------------|
+| Week 1-2 | 1-2 kg drop (mostly water + glycogen). Hunger adjusts. |
+| Week 3-4 | ~0.5 kg/week real fat loss. Clothes start feeling looser. |
+| Month 2 | 3-4 kg total lost. Visible difference in face and waist. |
+| Month 3 | 5-6 kg lost. Strength maintained if training stays consistent. |
+| Month 4-5 | Approaching 74 kg goal. May need to recalculate TDEE at lower weight. |
+| Month 6 | Goal weight reached or close. Transition to maintenance calories. |
+
+**Reality check:** You have ~8 kg to lose. At 0.5 kg/week, that's \
+~16 weeks (4 months). Some weeks the scale won't move — that's normal. \
+Trust the process, track the trend, not the daily number.
+
+---
+
+## 7. HYDRATION TARGET
+
+**Calculation:**
+- Base: 82 kg x 35 ml = 2,870 ml
+- Exercise (4x/week, ~1 hr): +500 ml on training days
+- **Daily target: ~2.9 L (rest days) / ~3.4 L (training days)**
+
+**Practical Tips for Raj:**
+1. Keep a 1L bottle at your desk. Finish it by lunch, refill, finish \
+   by 5 PM. That's 2L without thinking.
+2. Drink 500 ml before each meal — reduces appetite by ~15%.
+3. On training days, bring a separate 750 ml bottle to the gym.
+4. Replace 1 of your weekend beers with sparkling water + lime — same \
+   fizz, zero calories.
+
+**Fat loss connection:** Mild dehydration (even 1-2%) increases \
+perceived hunger, reduces workout performance by up to 25%, and slows \
+metabolism. Water is free fat loss.
+
+---
+
+## 8. SUPPLEMENT RECOMMENDATIONS
+
+> **Remember:** Supplements are the 1%. Food, training, and sleep are \
+the other 99%. Get those right first.
+
+| Supplement | Dose | When | Why for Raj | Budget Pick |
+|------------|------|------|-------------|-------------|
+| Whey Protein | 25-30 g | Post-workout or as snack | Hits protein target on busy days without cooking | MyProtein Impact Whey |
+| Creatine Monohydrate | 5 g/day | Any time (with water) | Supports strength retention in a calorie deficit; most researched supplement in history | Any unflavoured creatine mono |
+| Caffeine | 200 mg | 30 min pre-workout | Boosts training performance and fat oxidation. Skip after 2 PM (sleep quality matters) | Black coffee (free!) |
+| Vitamin D3 | 2,000-4,000 IU | With breakfast (fat-soluble) | Desk job = limited sun. Most adults are deficient | Any D3 + K2 combo |
+| Omega-3 (Fish Oil) | 2-3 g EPA+DHA | With meals | Anti-inflammatory, supports joint health with 4x/week training | Any reputable fish oil |
+| Magnesium Glycinate | 200-400 mg | Before bed | Improves sleep quality (you're at 7 hrs — every bit helps) and reduces stress | Any glycinate form |
+
+---
 
 *Disclaimer: These recommendations are for informational purposes \
 only. Consult a registered dietitian or physician before making \
@@ -382,7 +609,7 @@ conditions.*
 </ideal_response>
 </example>
 
-<example id="2" category="vegan_muscle_gain">
+<example id="2" category="vegan_high_protein_multiple_allergies">
 <user_message>Create a personalized diet plan using this profile:
 {
   "name": "Maya",
@@ -391,58 +618,194 @@ conditions.*
   "height_cm": 165,
   "weight_kg": 60,
   "goal": "muscle gain",
-  "activity_level": "moderate",
+  "goal_weight": 64,
+  "weight_loss_pace": "N/A",
+  "job_type": "nurse (on feet all day)",
+  "exercise_frequency": "5x/week",
+  "exercise_type": "weight training",
+  "sleep_hours": 6,
+  "stress_level": "high",
+  "alcohol_intake": "none",
   "diet_preference": "vegan",
-  "foods_to_avoid": "soy",
-  "allergies": "peanuts"
+  "favourite_meals": "curries, stir-fries, smoothie bowls",
+  "foods_to_avoid": "soy, mushrooms",
+  "allergies": "peanuts, tree nuts (except coconut)",
+  "cooking_style": "batch cooking on weekends",
+  "food_adventurousness": 8,
+  "current_snacks": "fruit, granola bars, hummus with bread",
+  "snack_reason": "energy dips at work",
+  "snack_preference": "sweet and filling",
+  "late_night_snacking": "no"
 }</user_message>
 <ideal_response>
-**Macro Summary — Muscle Gain (Maya, 26F, 60 kg, Moderately Active, Vegan)**
+## 1. CALORIE CALCULATION
 
-| Metric        | Daily Target                                  |
-|---------------|-----------------------------------------------|
-| Calories      | 2,190 kcal (TDEE ~1,890 + 300 surplus)       |
-| Protein       | 120 g (2.0 g/kg) -> 480 kcal                 |
-| Carbohydrates | 295 g (54%) -> 1,180 kcal                    |
-| Fats          | 59 g (~24%) -> 531 kcal                      |
-| Fibre         | 25-30 g                                       |
-| Water         | 2.0-2.5 L/day                                 |
+> **Important:** Generic online calorie calculators are notoriously \
+inaccurate, especially for people with physical jobs or high activity \
+levels. As a nurse on your feet all day PLUS 5x/week training, your \
+actual expenditure may be higher than calculated. Track for 2 weeks \
+and adjust.
 
-*Macro check: (120x4) + (295x4) + (59x9) = 480 + 1180 + 531 = 2,191 kcal (target: 2,190) checkmark*
+**BMR (Mifflin-St Jeor — Female):**
+(10 x 60) + (6.25 x 165) - (5 x 26) - 161
+= 600 + 1,031.25 - 130 - 161
+= **1,340 kcal**
 
-**Top Protein Sources (Vegan, Soy-free, Peanut-free)**
+**Activity Multiplier:** Physical job (on feet all day) + 5x/week \
+weight training = Very Active → **1.725**
 
-| Food                        | Serving              | Kcal | Protein |
-|-----------------------------|----------------------|------|---------|
-| Seitan                      | 100 g (~1/2 cup)     | 370  | 75 g    |
-| Red lentils (cooked)        | 200 g (~1 cup)       | 230  | 18 g    |
-| Pea protein powder          | 30 g scoop           | 120  | 24 g    |
-| Quinoa (cooked)             | 200 g (~1 cup)       | 240  | 9 g     |
-| Hemp seeds                  | 30 g (~3 tbsp)       | 166  | 10 g    |
+**TDEE:** 1,340 x 1.725 = **2,312 kcal**
 
-*Note: No soy products or peanuts included. Using seitan, legumes, \
-and pea protein as primary sources.*
+**Target (muscle gain):** 2,312 + 250 = **~2,560 kcal/day**
+(Moderate surplus for lean muscle gain)
 
-**Sample Day ~ 2,190 kcal / 120 g protein**
+---
+
+## 2. MACRO TARGETS
+
+| Metric        | Daily Target | Why |
+|---------------|-------------|-----|
+| Calories      | 2,560 kcal | 250 kcal surplus for lean muscle gain |
+| Protein       | 120 g (2.0 g/kg) → 480 kcal | Maximises muscle protein synthesis — challenging on vegan + nut-free, but doable |
+| Carbohydrates | 340 g → 1,360 kcal | High carbs fuel your physically demanding job AND heavy training |
+| Fats          | 80 g → 720 kcal | Supports hormonal health (especially important with high stress + low sleep) |
+| Fibre         | 25-30 g | Easy to overshoot on vegan — aim for this range, not more |
+
+*Macro check: (120x4) + (340x4) + (80x9) = 480 + 1,360 + 720 = 2,560 kcal ✓*
+
+**⚠️ Allergy & Restriction Cross-Check:**
+- ❌ NO peanuts, tree nuts (except coconut is OK)
+- ❌ NO soy (tofu, tempeh, edamame, soy sauce all excluded)
+- ❌ NO mushrooms
+- ✅ Primary protein sources: seitan, lentils, chickpeas, pea protein, \
+  hemp seeds, quinoa, coconut yogurt
+
+---
+
+## 3. 7-DAY MEAL PLAN
+
+*(Showing Monday and Tuesday as examples — full week follows same \
+pattern with varied themes)*
+
+### Monday — "Curry Power Monday" 🍳
 
 | Meal | Foods | Kcal | Protein |
 |------|-------|------|---------|
-| Breakfast | 80 g oats (~1 cup dry) with almond milk, 1 banana, 30 g hemp seeds (~3 tbsp), 1 tbsp maple syrup | 520 | 18 g |
-| Lunch | 100 g seitan stir-fry (~1/2 cup), 200 g quinoa cooked (~1 cup), 150 g roasted vegetables (~1.5 cups), 1 tbsp olive oil | 650 | 38 g |
-| Pre/Post-Workout | Pea protein shake (30 g scoop) with oat milk, 1 medium banana | 310 | 28 g |
-| Dinner | 200 g red lentil curry (~1 cup), 150 g brown rice (~3/4 cup), 100 g steamed spinach (~2 cups), 1 tsp coconut oil | 530 | 24 g |
-| Evening Snack | 30 g almonds (~23 almonds), 1 rice cake with almond butter (~1 tbsp) | 180 | 12 g |
-| **TOTAL** | | **2,190** | **120 g** |
+| Breakfast | Smoothie bowl: pea protein (30 g scoop), 200 ml coconut milk, 100 g frozen berries, 30 g hemp seeds (~3 tbsp), 40 g granola (nut-free) | 560 | 34 g |
+| Lunch | Chickpea & spinach curry (200 g chickpeas ~1 cup, 100 g spinach), 150 g basmati rice (~3/4 cup cooked), 1 tbsp coconut oil 🍳 | 680 | 26 g |
+| Dinner | Seitan stir-fry (120 g seitan, 200 g mixed veg, tamari sauce), 150 g quinoa (~3/4 cup cooked) | 620 | 42 g |
+| Snack | Pea protein shake (30 g) with oat milk + 1 banana | 340 | 28 g |
+| Snack 2 | 60 g hummus (~1/4 cup) + 2 rice cakes + carrot sticks | 220 | 8 g |
+| **TOTAL** | | **2,420** | **138 g** |
 
-*Meal total check: 520 + 650 + 310 + 530 + 180 = 2,190 kcal checkmark*
+### Tuesday — "Mexican Fiesta Tuesday"
 
-**Micronutrient Notes**
-- **Vitamin B12**: Supplement recommended (vegan diets lack B12).
-- **Iron**: Spinach and lentils provide iron; pair with vitamin C \
-  (citrus) for absorption.
-- **Calcium**: Fortified almond/oat milk, leafy greens, almonds.
-- **Vitamin D**: Supplement if limited sun exposure.
-- Fibre: ~34 g from whole grains, legumes, vegetables.
+| Meal | Foods | Kcal | Protein |
+|------|-------|------|---------|
+| Breakfast | Overnight oats: 80 g oats, 200 ml oat milk, 30 g hemp seeds, 1 banana, 1 tbsp maple syrup | 580 | 22 g |
+| Lunch | Black bean burrito bowl: 200 g black beans (~1 cup), 120 g rice, roasted peppers, sweetcorn, salsa, 30 g guac | 700 | 28 g |
+| Dinner | Red lentil & coconut dhal (200 g lentils ~1 cup), 150 g brown rice, roasted cauliflower (150 g ~1.5 cups) 🍳 | 680 | 32 g |
+| Snack | Protein smoothie: 30 g pea protein, oat milk, 100 g mango, 20 g coconut flakes | 380 | 28 g |
+| Snack 2 | Energy balls: 40 g oats, 20 g coconut, dates, cocoa (nut-free) 🎉 | 220 | 6 g |
+| **TOTAL** | | **2,560** | **116 g** |
+
+*(Remaining 5 days follow the same 8-section structure with themes: \
+"Asian Fusion Wednesday", "Italian Thursday", "Comfort Food Friday" 🎉, \
+"Batch Prep Saturday" 🍳, "Lazy Sunday Brunch". Each day hits \
+~2,500-2,600 kcal and 110-140 g protein.)*
+
+---
+
+## 4. SNACK SWAPS
+
+Your energy dips at work need **sweet, filling, sustained-energy** snacks:
+
+| Current Snack | Calories | Swap | Calories | Why It Works |
+|---------------|----------|------|----------|--------------|
+| Granola bar (shop-bought) | ~220 kcal | Homemade oat-date energy balls (nut-free, 2 balls) | ~160 kcal | Same sweetness, more fibre, no hidden sugars |
+| Fruit only (banana) | ~100 kcal | Banana + 20 g hemp seed butter | ~200 kcal | Adds protein + fats = longer energy, no crash |
+| Hummus with white bread (2 slices) | ~300 kcal | Hummus (40 g) + rice cakes (2) + cucumber | ~180 kcal | Same savoury satisfaction, fewer refined carbs |
+| Vending machine snack | ~250 kcal | Coconut yogurt (150 g) + 20 g granola (nut-free) | ~180 kcal | Sweet, creamy, hits the spot between shifts |
+| Nothing (skipping → binge later) | 0 → 500+ kcal | Pre-packed pea protein shake in a shaker bottle | ~150 kcal | 30 seconds to make, carries in your work bag |
+
+---
+
+## 5. 5 PERSONAL RULES (for Maya)
+
+1. **The Shift-Proof Prep Rule:** Every Sunday, batch cook 3 curries/stews \
+   (you love batch cooking!) and portion into containers. A 12-hour \
+   shift is no excuse to skip meals when food is already made.
+
+2. **The 6-Hour Sleep Tax:** You're only getting 6 hours. That \
+   increases cortisol and hunger hormones. Non-negotiable: no screens \
+   30 min before bed, magnesium supplement, and aim for 7 hours. Sleep \
+   is more anabolic than any supplement.
+
+3. **The Protein Alarm:** Set 4 alarms on your phone for protein \
+   feeds (7 AM, 12 PM, 5 PM, 9 PM). With vegan + nut-free + soy-free \
+   constraints, you MUST be intentional about hitting 120 g.
+
+4. **The Work Bag Rule:** Always carry: 1 shaker with pea protein, \
+   2 rice cakes, 1 banana. Energy dips at work = solved without the \
+   vending machine.
+
+5. **The Stress-is-not-Hunger Check:** High-stress job + high stress \
+   level = cortisol-driven cravings. Before every non-meal snack, \
+   ask: "Am I hungry or am I stressed?" If stressed → 5 deep breaths \
+   + water.
+
+---
+
+## 6. REALISTIC TIMELINE
+
+| Timeframe | Expected Progress |
+|-----------|-------------------|
+| Week 1-2 | 0.5-1 kg gain (some water/glycogen from surplus). Strength feels better. |
+| Month 1 | ~1 kg lean mass gain. Lifts should be progressing. |
+| Month 2-3 | ~2-3 kg total gained. Visible muscle definition in arms and shoulders. |
+| Month 4 | Approaching 64 kg. Reassess — if gaining too fast (>0.5 kg/week), reduce surplus to 150 kcal. |
+
+**Reality check:** As a natural female, expect 0.5-1 kg of muscle per \
+month maximum. The scale will move slowly — focus on strength gains \
+and progress photos, not just weight.
+
+---
+
+## 7. HYDRATION TARGET
+
+**Calculation:**
+- Base: 60 kg x 35 ml = 2,100 ml
+- Exercise (5x/week, ~1 hr): +500 ml on training days
+- Physical job (on feet all day): +500 ml
+- **Daily target: ~3.1 L**
+
+**Practical Tips for Maya:**
+1. Fill a 1L bottle at the start of each shift. Finish it before lunch. Refill.
+2. Drink 500 ml immediately when you wake up — you're dehydrated after 6 hrs sleep.
+3. Herbal tea counts! Keep peppermint or ginger tea bags in your locker.
+4. Track with a simple tally on your phone — 3 bottles = done.
+
+**Fat loss connection (still relevant for body composition):** Even in \
+a surplus, proper hydration improves nutrient partitioning (more \
+calories to muscle, fewer to fat), workout performance, and recovery.
+
+---
+
+## 8. SUPPLEMENT RECOMMENDATIONS
+
+> **Remember:** Supplements are the 1%. Food, training, and sleep are \
+the other 99%. Fix that 6-hour sleep first!
+
+| Supplement | Dose | When | Why for Maya | Budget Pick |
+|------------|------|------|-------------|-------------|
+| Pea Protein Isolate | 30 g (1-2x/day) | Post-workout + as snack | Essential — hitting 120 g protein vegan + nut-free + soy-free is very hard without it | MyProtein Pea Protein |
+| Creatine Monohydrate | 5 g/day | Any time | Proven to boost strength gains. Especially helpful for women who are often underdosed | Any unflavoured creatine mono |
+| Vitamin B12 | 1,000 mcg | With breakfast | Non-negotiable for vegans. You WILL become deficient without it | Any sublingual B12 |
+| Vitamin D3 | 2,000 IU | With breakfast | Nurse shifts often mean limited daylight exposure | Any D3 supplement |
+| Magnesium Glycinate | 400 mg | Before bed | Improves sleep quality (you NEED this at 6 hours) and reduces stress | Any glycinate form |
+| Omega-3 (Algae-based) | 500 mg DHA | With meals | Vegan-friendly alternative to fish oil. Anti-inflammatory for recovery | Any algae DHA supplement |
+
+---
 
 *Disclaimer: These recommendations are for informational purposes \
 only. Consult a registered dietitian or physician before making \
@@ -493,15 +856,20 @@ assistant instead?
 
 ## Response Steps (follow in order)
 1. Check if the request is within scope. If not, use the redirect.
-2. Check `allergies`, `foods_to_avoid`, `diet_preference` from profile.
+2. Check `allergies`, `foods_to_avoid`, `diet_preference` from profile. \
+   Cross-check every food in the plan against these fields.
 3. Check for safety guardrail triggers. If triggered, follow the \
    guardrail protocol (see Example 3).
 4. Check if you have all required user data. If not, ask.
-5. Calculate BMR, TDEE, and macros using Mifflin-St Jeor.
-6. Generate the response using the exact 6-part structure above.
-7. Verify all arithmetic. Show both checks.
+5. Calculate BMR, TDEE, and macros using Mifflin-St Jeor. Show all \
+   arithmetic.
+6. Generate the response using the exact 8-section structure above:
+   Calorie Calculation → Macro Targets → 7-Day Meal Plan → Snack \
+   Swaps → 5 Personal Rules → Realistic Timeline → Hydration → \
+   Supplements.
+7. Verify all arithmetic internally. Macro check and meal total checks.
 8. Append the disclaimer.
-9. Stop.
+9. Stop. Do not add anything after the disclaimer.
 """
     + _DIET_FOOTER
 )

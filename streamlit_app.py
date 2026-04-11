@@ -423,8 +423,11 @@ if "code" in _gcal_params:
             push_events_to_calendar,
         )
 
-        # Exchange auth code for tokens (PKCE is disabled — no code_verifier needed).
-        tokens = exchange_code_for_tokens(_gcal_code)
+        with st.spinner("🔐 Exchanging authorization code..."):
+            # Exchange auth code for tokens (PKCE is disabled — no code_verifier needed).
+            tokens = exchange_code_for_tokens(_gcal_code)
+
+        st.info("✅ Google authorization successful! Processing your plan...")
 
         # Load plan data from persisted context file (survives the redirect).
         # Fall back to session state if context file was empty.
@@ -434,28 +437,112 @@ if "code" in _gcal_params:
         _domain = _oauth_ctx.get("domain") or _wf.get("domain", "diet")
         _profile = _oauth_ctx.get("profile") or st.session_state.get("agent_state", {}).get("user_profile", {})
 
-        if _plan_text:
-            events = extract_calendar_events(_plan_text, _domain, _profile)
-            if events:
-                created_count = push_events_to_calendar(events, tokens)
-                st.success(
-                    f"✅ **{created_count} events** synced to your Google Calendar! "
-                    f"Check your calendar for recurring {_domain} reminders starting tomorrow."
-                )
-                _gcal_logger.info("[Calendar] Pushed %d events successfully", created_count)
+        _sync_target = _oauth_ctx.get("sync_target", "calendar")
+        _gcal_logger.info("[Calendar] sync_target=%s, plan_len=%d, domain=%s, profile_keys=%s",
+                          _sync_target, len(_plan_text), _domain,
+                          sorted(_profile.keys()) if _profile else "empty")
+        _gcal_logger.info("[Calendar] plan_text preview: %s", _plan_text[:200] if _plan_text else "(empty)")
 
-                # Store tokens in session for potential future use.
-                st.session_state["google_calendar_tokens"] = tokens
-                st.session_state["calendar_events_pushed"] = True
-                clear_oauth_context()  # Clean up temp file after success
-            else:
-                st.warning("⚠️ Connected to Google, but couldn't extract events from the plan.")
+        if _plan_text:
+            # ── Google Calendar sync ──
+            if _sync_target in ("calendar", "both"):
+                with st.spinner("📅 Extracting calendar events from your plan..."):
+                    events = extract_calendar_events(_plan_text, _domain, _profile)
+                if events:
+                    with st.spinner(f"📅 Pushing {len(events)} events to Google Calendar..."):
+                        created_count = push_events_to_calendar(events, tokens)
+                    st.success(
+                        f"📅 **{created_count} events** synced to your Google Calendar! "
+                        f"Check your calendar for recurring {_domain} reminders starting tomorrow."
+                    )
+                    _gcal_logger.info("[Calendar] Pushed %d events successfully", created_count)
+                    st.session_state["calendar_events_pushed"] = True
+                else:
+                    st.warning("⚠️ Connected to Google Calendar, but couldn't extract events from your plan.")
+
+            # ── Google Fit sync ──
+            if _sync_target in ("google_fit", "both"):
+                from agent.tools.google_fit_integration import (
+                    extract_nutrition_data,
+                    extract_activity_sessions,
+                    push_nutrition_to_google_fit,
+                    push_activities_to_google_fit,
+                )
+                if _domain == "diet":
+                    _gcal_logger.info("[GoogleFit] About to extract nutrition: plan_len=%d, profile_keys=%s",
+                                      len(_plan_text), sorted(_profile.keys()) if _profile else "empty")
+                    nutrition = None
+                    for _attempt in range(1, 3):  # 2 attempts
+                        with st.spinner(f"💪 Extracting nutrition data (attempt {_attempt}/2)..."):
+                            try:
+                                nutrition = extract_nutrition_data(_plan_text, _domain, _profile)
+                            except Exception as _ext_err:
+                                _gcal_logger.error("[GoogleFit] Extraction attempt %d failed: %s",
+                                                    _attempt, _ext_err, exc_info=True)
+                                nutrition = []
+                        if nutrition:
+                            break
+                        _gcal_logger.warning("[GoogleFit] Extraction attempt %d returned 0 entries", _attempt)
+
+                    _gcal_logger.info("[GoogleFit] Final extraction: %d entries", len(nutrition) if nutrition else 0)
+                    if nutrition:
+                        st.info(f"Found {len(nutrition)} meals. Pushing to Google Fit...")
+                        with st.spinner(f"💪 Pushing {len(nutrition)} meals to Google Fit..."):
+                            fit_count, fit_errors = push_nutrition_to_google_fit(nutrition, tokens)
+                        st.session_state["_gfit_push_count"] = fit_count
+                        if fit_count > 0:
+                            st.success(
+                                f"💪 **{fit_count} nutrition entries** synced to Google Fit! "
+                                f"Check the Google Fit app for your meal data."
+                            )
+                        if fit_errors:
+                            st.warning(
+                                f"⚠️ {len(fit_errors)} entries failed:\n"
+                                + "\n".join(f"- {e}" for e in fit_errors[:5])
+                            )
+                        if fit_count == 0 and not fit_errors:
+                            st.warning("⚠️ No entries were pushed. Check the logs for details.")
+                        _gcal_logger.info("[GoogleFit] Pushed %d nutrition entries, %d errors", fit_count, len(fit_errors))
+                    else:
+                        st.warning(
+                            f"⚠️ Connected to Google Fit, but couldn't extract nutrition data.\n\n"
+                            f"**Debug**: plan_text length = {len(_plan_text)}, domain = {_domain}, "
+                            f"profile fields = {len(_profile)} — check Logs panel for details."
+                        )
+                elif _domain == "workout":
+                    with st.spinner("💪 Extracting workout sessions from your plan..."):
+                        sessions = extract_activity_sessions(_plan_text, _domain, _profile)
+                    _gcal_logger.info("[GoogleFit] Extracted %d activity sessions", len(sessions) if sessions else 0)
+                    if sessions:
+                        st.info(f"Found {len(sessions)} workout sessions. Pushing to Google Fit...")
+                        with st.spinner(f"💪 Pushing {len(sessions)} sessions to Google Fit..."):
+                            fit_count, fit_errors = push_activities_to_google_fit(sessions, tokens)
+                        st.session_state["_gfit_push_count"] = fit_count
+                        if fit_count > 0:
+                            st.success(
+                                f"💪 **{fit_count} workout sessions** synced to Google Fit! "
+                                f"Check the Google Fit app for your activity data."
+                            )
+                        if fit_errors:
+                            st.warning(
+                                f"⚠️ {len(fit_errors)} sessions failed:\n"
+                                + "\n".join(f"- {e}" for e in fit_errors[:5])
+                            )
+                        _gcal_logger.info("[GoogleFit] Pushed %d sessions, %d errors", fit_count, len(fit_errors))
+                    else:
+                        st.warning("⚠️ Connected to Google Fit, but couldn't extract activity sessions from your plan.")
+                _gfit_actually_pushed = st.session_state.get("_gfit_push_count", 0) > 0
+                st.session_state["google_fit_data_pushed"] = _gfit_actually_pushed
+
+            # Store tokens and clean up.
+            st.session_state["google_calendar_tokens"] = tokens
+            clear_oauth_context()
         else:
             st.warning("⚠️ Connected to Google, but no plan text found. Create a plan first, then sync.")
 
     except Exception as e:
-        st.error(f"❌ Calendar sync failed: {e}")
-        _gcal_logger.error("[Calendar] OAuth or push failed: %s", e)
+        st.error(f"❌ Sync failed: {e}")
+        _gcal_logger.error("[Calendar] OAuth or push failed: %s", e, exc_info=True)
 
 # ── Session state init ────────────────────────────────────────────
 
@@ -894,20 +981,28 @@ with st.sidebar:
     elif _has_google_creds and _calendar_stage == "calendar_oauth_pending":
         try:
             from agent.tools.calendar_integration import (
-                get_authorization_url, save_oauth_context,
+                get_authorization_url, save_oauth_context, load_oauth_context as _cal_load_ctx,
             )
             # Generate auth URL (PKCE disabled — no code_verifier to manage).
             _auth_url, _ = get_authorization_url()
 
             # Persist plan data to temp file so it survives the OAuth redirect.
+            # Only write if we have plan text — don't overwrite a good context
+            # file with empty data on Streamlit reruns.
             _oauth_plan_text = _wf_state.get("plan_text", "")
-            _oauth_domain = _wf_state.get("domain", "diet")
-            _oauth_profile = st.session_state.get("agent_state", {}).get("user_profile", {})
-            save_oauth_context(
-                plan_text=_oauth_plan_text,
-                domain=_oauth_domain,
-                profile=_oauth_profile,
-            )
+            if not _oauth_plan_text:
+                _existing_cal_ctx = _cal_load_ctx()
+                _oauth_plan_text = _existing_cal_ctx.get("plan_text", "")
+
+            if _oauth_plan_text:
+                _oauth_domain = _wf_state.get("domain", "diet")
+                _oauth_profile = st.session_state.get("agent_state", {}).get("user_profile", {})
+                save_oauth_context(
+                    plan_text=_oauth_plan_text,
+                    domain=_oauth_domain,
+                    profile=_oauth_profile,
+                    sync_target="both",
+                )
 
             st.link_button("📅 Connect Google Calendar", _auth_url, use_container_width=True)
             st.caption("Sign in with Google to sync your plan.")
@@ -917,6 +1012,49 @@ with st.sidebar:
         st.caption("Add Google credentials to `.env` to enable calendar sync.")
     else:
         st.caption("Generate a plan to enable calendar sync.")
+
+    # ── Google Fit ──────────────────────────────────────────────
+    st.markdown("## 💪 Google Fit")
+
+    _gfit_already_pushed = st.session_state.get("google_fit_data_pushed", False)
+
+    if _gfit_already_pushed:
+        st.success("✅ Google Fit synced!")
+    elif _has_google_creds and _calendar_stage == "google_fit_oauth_pending":
+        try:
+            from agent.tools.calendar_integration import (
+                get_authorization_url as _gfit_get_auth_url,
+                save_oauth_context as _gfit_save_ctx,
+                load_oauth_context as _gfit_load_ctx,
+            )
+            _gfit_auth_url, _ = _gfit_get_auth_url()
+
+            # Only save context if we have plan text — don't overwrite
+            # a good context file with empty data on Streamlit reruns.
+            _gfit_plan_text = _wf_state.get("plan_text", "")
+            if not _gfit_plan_text:
+                # Try loading from existing context file
+                _existing_ctx = _gfit_load_ctx()
+                _gfit_plan_text = _existing_ctx.get("plan_text", "")
+
+            if _gfit_plan_text:
+                _gfit_domain = _wf_state.get("domain", "diet")
+                _gfit_profile = st.session_state.get("agent_state", {}).get("user_profile", {})
+                _gfit_save_ctx(
+                    plan_text=_gfit_plan_text,
+                    domain=_gfit_domain,
+                    profile=_gfit_profile,
+                    sync_target="google_fit",
+                )
+
+            st.link_button("💪 Sync to Google Fit", _gfit_auth_url, use_container_width=True)
+            st.caption("Sign in with Google to sync nutrition/activity data.")
+        except Exception as _e:
+            st.caption(f"⚠️ Google Fit error: {_e}")
+    elif not _has_google_creds:
+        st.caption("Add Google credentials to `.env` to enable Google Fit.")
+    else:
+        st.caption("Generate a plan to enable Google Fit sync.")
 
     st.divider()
 
@@ -1141,19 +1279,27 @@ if prompt:
             st.caption(f"Response time: {elapsed:.1f}s")
             st.session_state.response_times.append(round(elapsed, 1))
 
-        # ── Visual plan outputs (only when user asks) ─────────────
+        # ── Visual plan outputs ─────────────────────────────────────
+        # Auto-render rich visuals for diet plans (no keyword needed).
+        # Workout visuals still require explicit user request.
         _viz_keywords = ["chart", "graph", "visuali", "pie chart", "show me a", "plot", "diagram"]
         _user_wants_viz = any(kw in prompt.lower() for kw in _viz_keywords)
-        if response_content and tool_used and _user_wants_viz:
+        _is_diet_plan = (
+            tool_used == "diet_tool"
+            and response_content
+            and len(response_content) > 800
+            and any(kw in response_content.lower() for kw in ["macro", "meal plan", "7-day", "protein"])
+        )
+
+        if response_content and tool_used and (_user_wants_viz or _is_diet_plan):
             _profile = st.session_state.agent_state.get("user_profile", {})
             try:
-                from agent.visualizations import (
-                    create_macro_pie_chart,
-                    create_progress_timeline,
-                    create_weekly_schedule,
-                )
-                with st.expander("📈 Visual Plan Outputs", expanded=True):
-                    if tool_used == "workout_tool":
+                if tool_used == "workout_tool" and _user_wants_viz:
+                    from agent.visualizations import (
+                        create_progress_timeline,
+                        create_weekly_schedule,
+                    )
+                    with st.expander("📈 Visual Plan Outputs", expanded=True):
                         _days = _profile.get("workout_days", 4)
                         fig1 = create_weekly_schedule(
                             workout_days=_days if isinstance(_days, int) else 4,
@@ -1170,15 +1316,74 @@ if prompt:
                         st.pyplot(fig2)
                         plt.close(fig2)
 
-                    elif tool_used == "diet_tool":
-                        fig = create_macro_pie_chart(
-                            plan_text=response_content,
-                            profile=_profile,
+                elif _is_diet_plan:
+                    from agent.diet_visuals import (
+                        extract_macros_from_plan,
+                        create_macro_donut_chart,
+                    )
+
+                    # ── Macro Pie Chart (next to summary) ───────────────
+                    _macros = extract_macros_from_plan(response_content)
+                    _p_g = _macros.get("protein_g", 0)
+                    _c_g = _macros.get("carbs_g", 0)
+                    _f_g = _macros.get("fat_g", 0)
+                    _total = _macros.get("total_kcal", 0)
+
+                    if _p_g > 0 and _c_g > 0 and _f_g > 0:
+                        st.markdown("---")
+                        st.markdown(
+                            '<p style="font-size:1.1rem;font-weight:800;color:#ff6b2b;'
+                            'margin-bottom:4px;">📊 Macro Distribution</p>',
+                            unsafe_allow_html=True,
                         )
-                        st.pyplot(fig)
-                        plt.close(fig)
+                        _macro_col1, _macro_col2 = st.columns([3, 2])
+                        with _macro_col1:
+                            # Summary cards
+                            _mc1, _mc2, _mc3 = st.columns(3)
+                            with _mc1:
+                                st.markdown(
+                                    '<div style="background:#1a1a1a;border:1px solid #2ecc71;'
+                                    'border-radius:12px;padding:14px;text-align:center;">'
+                                    '<div style="color:#888;font-size:0.7rem;font-weight:600;'
+                                    'text-transform:uppercase;letter-spacing:0.08em;">Protein</div>'
+                                    f'<div style="color:#2ecc71;font-size:1.6rem;font-weight:900;">'
+                                    f'{_p_g:.0f}g</div>'
+                                    f'<div style="color:#555;font-size:0.75rem;">'
+                                    f'{_p_g * 4:.0f} kcal</div></div>',
+                                    unsafe_allow_html=True,
+                                )
+                            with _mc2:
+                                st.markdown(
+                                    '<div style="background:#1a1a1a;border:1px solid #3498db;'
+                                    'border-radius:12px;padding:14px;text-align:center;">'
+                                    '<div style="color:#888;font-size:0.7rem;font-weight:600;'
+                                    'text-transform:uppercase;letter-spacing:0.08em;">Carbs</div>'
+                                    f'<div style="color:#3498db;font-size:1.6rem;font-weight:900;">'
+                                    f'{_c_g:.0f}g</div>'
+                                    f'<div style="color:#555;font-size:0.75rem;">'
+                                    f'{_c_g * 4:.0f} kcal</div></div>',
+                                    unsafe_allow_html=True,
+                                )
+                            with _mc3:
+                                st.markdown(
+                                    '<div style="background:#1a1a1a;border:1px solid #e74c3c;'
+                                    'border-radius:12px;padding:14px;text-align:center;">'
+                                    '<div style="color:#888;font-size:0.7rem;font-weight:600;'
+                                    'text-transform:uppercase;letter-spacing:0.08em;">Fat</div>'
+                                    f'<div style="color:#e74c3c;font-size:1.6rem;font-weight:900;">'
+                                    f'{_f_g:.0f}g</div>'
+                                    f'<div style="color:#555;font-size:0.75rem;">'
+                                    f'{_f_g * 9:.0f} kcal</div></div>',
+                                    unsafe_allow_html=True,
+                                )
+
+                        with _macro_col2:
+                            _donut_fig = create_macro_donut_chart(_p_g, _c_g, _f_g, _total)
+                            st.pyplot(_donut_fig, use_container_width=True)
+                            plt.close(_donut_fig)
+
             except Exception as viz_err:
-                _ui_logger.warning("Visualization error: %s", viz_err)
+                _ui_logger.warning("Visualization error: %s", viz_err, exc_info=True)
 
         # ── User feedback widget ─────────────────────────────────
         if response_content:

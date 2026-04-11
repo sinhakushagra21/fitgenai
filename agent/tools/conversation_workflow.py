@@ -50,8 +50,19 @@ BASE_PROFILE_FIELDS = [
     "activity_level",
 ]
 
+DIET_PROFILE_FIELDS = [
+    # Section 1 — Your Stats
+    "name", "age", "sex", "height_cm", "weight_kg", "goal", "goal_weight", "weight_loss_pace",
+    # Section 2 — Your Lifestyle
+    "job_type", "exercise_frequency", "exercise_type", "sleep_hours", "stress_level", "alcohol_intake",
+    # Section 3 — Food Preferences
+    "diet_preference", "favourite_meals", "foods_to_avoid", "allergies", "cooking_style", "food_adventurousness",
+    # Section 4 — Snack Habits
+    "current_snacks", "snack_reason", "snack_preference", "late_night_snacking",
+]
+
 DOMAIN_REQUIRED_FIELDS = {
-    "diet": BASE_PROFILE_FIELDS + ["diet_preference", "foods_to_avoid", "allergies"],
+    "diet": DIET_PROFILE_FIELDS,
     "workout": BASE_PROFILE_FIELDS + ["fitness_level", "equipment", "workout_days"],
 }
 
@@ -472,17 +483,21 @@ def generate_plan(
             f"{existing_plan}\n\n"
             f"The user wants the following changes:\n"
             f"\"{query}\"\n\n"
-            f"Regenerate the FULL {domain} plan with these changes applied. "
-            f"Keep everything else from the current plan that wasn't asked to change. "
-            f"Provide practical, safe, actionable steps with concise structure."
+            f"IMPORTANT INSTRUCTIONS:\n"
+            f"1. Apply ONLY the requested changes to the existing plan.\n"
+            f"2. Keep everything else from the current plan EXACTLY as-is.\n"
+            f"3. You MUST follow the Output Contract from your system prompt — "
+            f"output ALL required sections in the correct format.\n"
+            f"4. Output the COMPLETE updated plan (all sections), not just the changed parts.\n"
         )
     else:
         # Create flow: generate from scratch
         prompt = (
             f"Create a personalized {domain} plan using this profile:\n"
             f"{json.dumps(profile, indent=2)}\n\n"
-            f"Latest user instruction: {query}\n"
-            "Provide practical, safe, actionable steps with concise structure."
+            f"User's original request: \"{query}\"\n\n"
+            f"IMPORTANT: Follow the Output Contract from your system prompt EXACTLY. "
+            f"Include ALL required sections in order."
         )
 
     resp = llm.invoke([
@@ -572,6 +587,35 @@ def handle_multi_turn(
         is_followup,
     )
 
+    # ──────────────────────────────────────────────────────────────────
+    # Helper: detect Google Fit sync request from user message
+    # (MUST run before intent resolution so we can override the intent)
+    # ──────────────────────────────────────────────────────────────────
+    _gfit_keywords = {"google fit", "googlefit", "sync to fit", "sync fit",
+                      "sync to google fit", "push to fit", "push to google fit"}
+    _query_lower = query.strip().lower()
+    _is_google_fit_request = any(kw in _query_lower for kw in _gfit_keywords)
+
+    # Helper: detect "done" / "that's it" / "all set" as confirmation
+    _done_keywords = {"done", "that's it", "thats it", "all set", "i'm done",
+                      "im done", "finished", "all good", "that is all",
+                      "nothing else", "no changes", "no more"}
+    _is_done_signal = _query_lower.strip().rstrip(".!") in _done_keywords or any(
+        kw == _query_lower.strip().rstrip(".!") for kw in _done_keywords
+    )
+    if _is_done_signal:
+        is_confirmation = True
+        classified_intent = "confirm"
+
+    # [FIX-6] If this is a Google Fit sync request, DON'T let the intent
+    # resolver reset the stage — we need plan_feedback/calendar_sync/etc.
+    # to remain so the stage handler can intercept and transition properly.
+    if _is_google_fit_request:
+        logger.info("[Workflow:%s] Google Fit sync request detected — preserving stage=%s", domain, stage)
+        # Override classified_intent so it won't trigger stage reset
+        classified_intent = "confirm"  # harmless — stage handlers check _is_google_fit_request first
+        is_confirmation = False
+
     # 3) Resolve effective intent
     if classified_intent in {"get", "delete", "update", "create"}:
         intent = classified_intent
@@ -590,6 +634,215 @@ def handle_multi_turn(
             workflow.pop("stage", None)
 
     # ──────────────────────────────────────────────────────────────────
+    # STAGE: calendar_oauth_pending  (user was shown the OAuth link)
+    # ──────────────────────────────────────────────────────────────────
+    if stage == "calendar_oauth_pending":
+        # User sent "sync to google fit" while calendar OAuth is pending
+        if _is_google_fit_request:
+            plan_text = workflow.get("plan_text", "")
+            workflow = append_completed_step(
+                workflow,
+                {"intent": workflow.get("intent", "create"),
+                 "stage": "google_fit_sync", "domain": domain,
+                 "plan_text": plan_text,
+                 "pending_question": "Would you like to sync your plan to Google Fit? (yes/no)"},
+                "calendar_oauth_to_google_fit",
+            )
+            return build_response(
+                assistant_message=(
+                    "Would you like to sync your plan data to **Google Fit**? "
+                    "This will log your meals/workouts in the Google Fit app. (yes/no)"
+                ),
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+
+        # User confirms / says "done" — they've completed OAuth or are finished
+        if is_confirmation or _is_done_signal:
+            plan_text = workflow.get("plan_text", "")
+            workflow = append_completed_step(
+                workflow,
+                {"intent": workflow.get("intent", "create"),
+                 "stage": "google_fit_sync", "domain": domain,
+                 "plan_text": plan_text,
+                 "pending_question": "Would you like to sync your plan to Google Fit? (yes/no)"},
+                "calendar_oauth_completed",
+            )
+            return build_response(
+                assistant_message=(
+                    "Great! Would you also like to sync your plan data to "
+                    "**Google Fit**? (yes/no)"
+                ),
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+
+        # User rejects / says no — skip everything
+        if classified_intent == "reject":
+            workflow = append_completed_step(workflow, {}, "calendar_oauth_skipped")
+            return build_response(
+                assistant_message="No worries — you're all set! Enjoy your plan. 💪",
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+
+        # Any other message — remind them about the OAuth button
+        return build_response(
+            assistant_message=(
+                "Click the **\"📅 Connect Google Calendar\"** button in the sidebar "
+                "to complete the sync.\n\n"
+                "Or type **done** if you're finished, or **sync to Google Fit** "
+                "if you'd like to sync there instead."
+            ),
+            state_id=state_id,
+            user_email=user_email,
+            workflow=workflow,
+            user_profile=profile,
+            state_manager=state_manager,
+        )
+
+    # ──────────────────────────────────────────────────────────────────
+    # STAGE: google_fit_oauth_pending  (user was shown the Fit OAuth button)
+    # ──────────────────────────────────────────────────────────────────
+    if stage == "google_fit_oauth_pending":
+        # User confirms / says done — they've completed OAuth or are finished
+        if is_confirmation or _is_done_signal:
+            workflow = append_completed_step(workflow, {}, "google_fit_oauth_completed")
+            return build_response(
+                assistant_message="You're all set! Enjoy your plan. 💪",
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+
+        # User rejects
+        if classified_intent == "reject":
+            workflow = append_completed_step(workflow, {}, "google_fit_oauth_skipped")
+            return build_response(
+                assistant_message="Got it — no Google Fit sync. You're all set! Enjoy your plan. 💪",
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+
+        # Any other message — remind them about the button
+        return build_response(
+            assistant_message=(
+                "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
+                "to complete the sync.\n\n"
+                "Or type **done** if you're finished."
+            ),
+            state_id=state_id,
+            user_email=user_email,
+            workflow=workflow,
+            user_profile=profile,
+            state_manager=state_manager,
+        )
+
+    # ──────────────────────────────────────────────────────────────────
+    # STAGE: google_fit_sync
+    # ──────────────────────────────────────────────────────────────────
+    if stage == "google_fit_sync":
+        stage_intent = workflow.get("intent") or active_intent
+        if classified_intent in {"get", "delete", "update", "create"} and classified_intent != stage_intent:
+            logger.info("[Workflow:%s] google_fit_sync interrupted by intent=%s", domain, classified_intent)
+            workflow = append_completed_step(
+                workflow, {"intent": classified_intent, "domain": domain},
+                "google_fit_interrupted_by_intent",
+            )
+            stage = None
+            workflow.pop("stage", None)
+        else:
+            if is_confirmation:
+                try:
+                    from agent.tools.calendar_integration import (
+                        get_authorization_url, save_oauth_context,
+                    )
+                    auth_url, oauth_state = get_authorization_url()
+                except Exception as e:
+                    logger.warning("[Workflow:%s] Google Fit OAuth setup failed: %s", domain, e)
+                    auth_url = None
+
+                if auth_url:
+                    plan_text = workflow.get("plan_text", "")
+                    save_oauth_context(
+                        plan_text=plan_text,
+                        domain=domain,
+                        profile=profile,
+                        sync_target="google_fit",
+                    )
+                    logger.info("[Workflow:%s] Saved OAuth context for Google Fit: plan_len=%d",
+                                domain, len(plan_text))
+                    workflow = append_completed_step(
+                        workflow,
+                        {"stage": "google_fit_oauth_pending", "domain": domain,
+                         "plan_text": plan_text},
+                        "google_fit_oauth_started",
+                    )
+                    return build_response(
+                        assistant_message=(
+                            "💪 **Ready to connect Google Fit!**\n\n"
+                            "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
+                            "to sign in with Google and sync your plan data.\n\n"
+                            f"Or open this link directly: [Authorize Google Fit]({auth_url})"
+                        ),
+                        state_id=state_id,
+                        user_email=user_email,
+                        workflow=workflow,
+                        user_profile=profile,
+                        state_manager=state_manager,
+                        extra={"google_fit_sync_requested": True},
+                    )
+                else:
+                    workflow = append_completed_step(workflow, {}, "google_fit_no_oauth")
+                    return build_response(
+                        assistant_message=(
+                            "I'd love to sync to Google Fit, but the Google integration "
+                            "is not configured yet. Please add GOOGLE_CLIENT_ID and "
+                            "GOOGLE_CLIENT_SECRET to your .env file."
+                        ),
+                        state_id=state_id,
+                        user_email=user_email,
+                        workflow=workflow,
+                        user_profile=profile,
+                        state_manager=state_manager,
+                    )
+
+            if classified_intent == "reject":
+                workflow = append_completed_step(workflow, {}, "google_fit_sync_skipped")
+                return build_response(
+                    assistant_message="Got it — no Google Fit sync. You're all set! Enjoy your plan. 💪",
+                    state_id=state_id,
+                    user_email=user_email,
+                    workflow=workflow,
+                    user_profile=profile,
+                    state_manager=state_manager,
+                )
+
+            # Unrecognised input — re-prompt.
+            return build_response(
+                assistant_message="Would you like to sync your plan to Google Fit? (yes/no)",
+                state_id=state_id,
+                user_email=user_email,
+                workflow=workflow,
+                user_profile=profile,
+                state_manager=state_manager,
+            )
+
+    # ──────────────────────────────────────────────────────────────────
     # STAGE: calendar_sync
     # ──────────────────────────────────────────────────────────────────
     if stage == "calendar_sync":
@@ -603,10 +856,75 @@ def handle_multi_turn(
             )
             stage = None
             workflow.pop("stage", None)
+        elif _is_google_fit_request:
+            # User said "sync to google fit" when asked about calendar
+            # → skip calendar, go directly to Google Fit OAuth (no extra confirmation)
+            plan_text = workflow.get("plan_text", "")
+            update_calendar_sync(state_id, False)
+            try:
+                from agent.tools.calendar_integration import (
+                    get_authorization_url as _cs_get_auth,
+                    save_oauth_context as _cs_save_ctx,
+                )
+                _cs_auth_url, _ = _cs_get_auth()
+            except Exception as e:
+                logger.warning("[Workflow:%s] Google Fit OAuth setup failed: %s", domain, e)
+                _cs_auth_url = None
+
+            if _cs_auth_url and plan_text:
+                _cs_save_ctx(
+                    plan_text=plan_text, domain=domain,
+                    profile=profile, sync_target="google_fit",
+                )
+                workflow = append_completed_step(
+                    workflow,
+                    {"intent": workflow.get("intent", "create"),
+                     "stage": "google_fit_oauth_pending", "domain": domain,
+                     "plan_text": plan_text},
+                    "calendar_sync_direct_to_google_fit_oauth",
+                )
+                return build_response(
+                    assistant_message=(
+                        "Skipping Google Calendar.\n\n"
+                        "💪 **Ready to connect Google Fit!**\n\n"
+                        "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
+                        "to sign in with Google and sync your plan data.\n\n"
+                        f"Or open this link directly: [Authorize Google Fit]({_cs_auth_url})"
+                    ),
+                    state_id=state_id,
+                    user_email=user_email,
+                    workflow=workflow,
+                    user_profile=profile,
+                    state_manager=state_manager,
+                    extra={"google_fit_sync_requested": True},
+                )
+            else:
+                workflow = append_completed_step(
+                    workflow,
+                    {"intent": workflow.get("intent", "create"),
+                     "stage": "google_fit_sync", "domain": domain,
+                     "plan_text": plan_text,
+                     "pending_question": "Would you like to sync your plan to Google Fit? (yes/no)"},
+                    "calendar_sync_to_google_fit_no_auth",
+                )
+                return build_response(
+                    assistant_message=(
+                        "Skipping Google Calendar.\n\n"
+                        "Would you like to sync your plan data to **Google Fit** instead? "
+                        "This will log your meals/workouts in the Google Fit app. (yes/no)"
+                    ),
+                    state_id=state_id,
+                    user_email=user_email,
+                    workflow=workflow,
+                    user_profile=profile,
+                    state_manager=state_manager,
+                )
         else:
             if is_confirmation:
                 try:
-                    from agent.tools.calendar_integration import get_authorization_url
+                    from agent.tools.calendar_integration import (
+                        get_authorization_url, save_oauth_context,
+                    )
                     auth_url, oauth_state = get_authorization_url()
                 except Exception as e:
                     logger.warning("[Workflow:%s] Calendar OAuth setup failed: %s", domain, e)
@@ -616,6 +934,18 @@ def handle_multi_turn(
                 if auth_url:
                     update_calendar_sync(state_id, True)
                     plan_text = workflow.get("plan_text", "")
+
+                    # Persist plan data to temp file NOW — the callback
+                    # reads this after the OAuth redirect.
+                    # sync_target="both" pushes to Calendar + Google Fit.
+                    save_oauth_context(
+                        plan_text=plan_text,
+                        domain=domain,
+                        profile=profile,
+                        sync_target="both",
+                    )
+                    logger.info("[Workflow:%s] Saved OAuth context: plan_len=%d, sync=both",
+                                domain, len(plan_text))
                     workflow = append_completed_step(
                         workflow,
                         {"stage": "calendar_oauth_pending", "domain": domain,
@@ -655,9 +985,20 @@ def handle_multi_turn(
 
             if classified_intent == "reject":
                 update_calendar_sync(state_id, False)
-                workflow = append_completed_step(workflow, {}, "calendar_sync_skipped")
+                plan_text = workflow.get("plan_text", "")
+                workflow = append_completed_step(
+                    workflow,
+                    {"intent": workflow.get("intent", "create"), "stage": "google_fit_sync",
+                     "domain": domain, "plan_text": plan_text,
+                     "pending_question": "Would you like to sync your plan to Google Fit? (yes/no)"},
+                    "calendar_sync_skipped",
+                )
                 return build_response(
-                    assistant_message="No problem — I won't sync it to Google Calendar.",
+                    assistant_message=(
+                        "No problem — I won't sync it to Google Calendar.\n\n"
+                        "Would you like to sync your plan data to **Google Fit** instead? "
+                        "This will log your meals/workouts in the Google Fit app. (yes/no)"
+                    ),
                     state_id=state_id,
                     user_email=user_email,
                     workflow=workflow,
@@ -718,6 +1059,67 @@ def handle_multi_turn(
             stage = None
             workflow.pop("stage", None)
             # Fall through to CRUD handlers below
+
+        # Intercept: user asks to sync to Google Fit directly from plan_feedback
+        # Skip the confirmation step — they clearly want it. Go straight to OAuth.
+        elif _is_google_fit_request:
+            plan_text = workflow.get("plan_text", "")
+            try:
+                from agent.tools.calendar_integration import (
+                    get_authorization_url as _pf_get_auth,
+                    save_oauth_context as _pf_save_ctx,
+                )
+                _pf_auth_url, _ = _pf_get_auth()
+            except Exception as e:
+                logger.warning("[Workflow:%s] Google Fit OAuth setup failed: %s", domain, e)
+                _pf_auth_url = None
+
+            if _pf_auth_url and plan_text:
+                _pf_save_ctx(
+                    plan_text=plan_text, domain=domain,
+                    profile=profile, sync_target="google_fit",
+                )
+                workflow = append_completed_step(
+                    workflow,
+                    {"intent": workflow.get("intent", "create"),
+                     "stage": "google_fit_oauth_pending", "domain": domain,
+                     "plan_text": plan_text},
+                    "plan_feedback_direct_to_google_fit_oauth",
+                )
+                return build_response(
+                    assistant_message=(
+                        "💪 **Ready to connect Google Fit!**\n\n"
+                        "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
+                        "to sign in with Google and sync your plan data.\n\n"
+                        f"Or open this link directly: [Authorize Google Fit]({_pf_auth_url})"
+                    ),
+                    state_id=state_id,
+                    user_email=user_email,
+                    workflow=workflow,
+                    user_profile=profile,
+                    state_manager=state_manager,
+                    extra={"google_fit_sync_requested": True},
+                )
+            else:
+                workflow = append_completed_step(
+                    workflow,
+                    {"intent": workflow.get("intent", "create"),
+                     "stage": "google_fit_sync", "domain": domain,
+                     "plan_text": plan_text,
+                     "pending_question": "Would you like to sync your plan to Google Fit? (yes/no)"},
+                    "plan_feedback_to_google_fit_no_auth",
+                )
+                return build_response(
+                    assistant_message=(
+                        "Would you like to sync your plan data to **Google Fit**? "
+                        "This will log your meals/workouts in the Google Fit app. (yes/no)"
+                    ),
+                    state_id=state_id,
+                    user_email=user_email,
+                    workflow=workflow,
+                    user_profile=profile,
+                    state_manager=state_manager,
+                )
 
         # Path A: User confirms the plan
         elif is_confirmation:
