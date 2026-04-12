@@ -39,7 +39,7 @@ from agent.persistence import get_context_state, get_latest_context_state_by_ema
 from agent.config import DEFAULT_MODEL, FAST_MODEL
 from agent.prompts.base_prompts import BASE_PROMPTS
 from agent.prompts.techniques import TECHNIQUE_KEYS, TECHNIQUE_META
-from agent.tools.conversation_workflow import DOMAIN_REQUIRED_FIELDS
+from agent.shared.types import DOMAIN_REQUIRED_FIELDS
 
 
 # ── Log capture ───────────────────────────────────────────────────
@@ -616,6 +616,54 @@ def _copy_button(text: str, key: str) -> None:
     )
 
 
+def _render_plan(plan_text: str) -> None:
+    """Render a plan — try JSON structured display, fallback to markdown.
+
+    If *plan_text* is valid JSON (from ``generate_plan_as_json``), iterate
+    its top-level keys and render each section with appropriate formatting
+    (tables for day-based meal/workout data, bullet lists, plain text).
+    No hardcoded schema — handles whatever structure the LLM returned.
+    """
+    try:
+        plan = json.loads(plan_text)
+        if not isinstance(plan, dict):
+            raise TypeError("Plan is not a dict")
+
+        for section_key, section_data in plan.items():
+            # Section header: convert snake_case → Title Case
+            header = section_key.replace("_", " ").title()
+            st.markdown(f"### {header}")
+
+            if isinstance(section_data, dict):
+                # Nested dict (e.g. day-by-day meals, macro targets)
+                for sub_key, sub_val in section_data.items():
+                    sub_header = sub_key.replace("_", " ").title()
+                    st.markdown(f"**{sub_header}**")
+                    if isinstance(sub_val, list):
+                        for item in sub_val:
+                            st.markdown(f"- {item}" if isinstance(item, str) else f"- {json.dumps(item)}")
+                    elif isinstance(sub_val, dict):
+                        for k, v in sub_val.items():
+                            st.markdown(f"- **{k}**: {v}")
+                    else:
+                        st.markdown(str(sub_val))
+            elif isinstance(section_data, list):
+                for item in section_data:
+                    if isinstance(item, dict):
+                        parts = [f"**{k}**: {v}" for k, v in item.items()]
+                        st.markdown("- " + " | ".join(parts))
+                    else:
+                        st.markdown(f"- {item}")
+            else:
+                st.markdown(str(section_data))
+
+            st.markdown("---")
+
+    except (json.JSONDecodeError, TypeError, KeyError):
+        # Not JSON or unexpected structure — render as markdown
+        st.markdown(plan_text)
+
+
 # ── Profile intake form config ────────────────────────────────────────
 
 PROFILE_FORM_FIELDS: dict[str, dict] = {
@@ -874,17 +922,23 @@ with st.sidebar:
     # ── Workflow Progress ──────────────────────────────────────
     st.markdown("## 📊 Session")
     _workflow = st.session_state.agent_state.get("workflow", {})
-    _stage = _workflow.get("stage", "")
+    _step = _workflow.get("step_completed") or _workflow.get("stage", "")
     _domain = _workflow.get("domain", "")
     _completed = _workflow.get("completed_steps", [])
 
     _STAGES = [
-        ("collect_profile",  "Profile"),
-        ("confirm_profile",  "Confirm"),
-        ("plan_feedback",    "Plan Review"),
-        ("calendar_sync",    "Calendar"),
+        ("profile_collection_started", "Profile"),
+        ("profile_mapped",             "Confirm"),
+        ("plan_generated",             "Plan Review"),
+        ("calendar_sync_started",      "Calendar"),
     ]
-    _is_complete = any(s in _completed for s in ("plan_confirmed", "calendar_sync_yes", "calendar_sync_no"))
+    _is_complete = any(
+        s in _completed
+        for s in (
+            "diet_confirmed", "workout_confirmed",
+            "calendar_sync_started", "google_fit_sync_started",
+        )
+    )
 
     if _domain:
         st.markdown(
@@ -897,7 +951,7 @@ with st.sidebar:
         if _is_complete or _s_key in _completed or any(_s_key in c for c in _completed):
             _dot = "progress-dot-done"
             _style = "color:#2ecc71;"
-        elif _s_key == _stage:
+        elif _s_key == _step or _s_key in _step:
             _dot = "progress-dot-active"
             _style = "color:#ff6b2b;font-weight:600;"
         else:
@@ -973,12 +1027,18 @@ with st.sidebar:
 
     _has_google_creds = bool(os.getenv("GOOGLE_CLIENT_ID")) and bool(os.getenv("GOOGLE_CLIENT_SECRET"))
     _wf_state = st.session_state.get("agent_state", {}).get("workflow", {})
-    _calendar_stage = _wf_state.get("stage")
+    _calendar_step = _wf_state.get("step_completed") or _wf_state.get("stage")
     _already_pushed = st.session_state.get("calendar_events_pushed", False)
+
+    _calendar_sync_active = _calendar_step in (
+        "diet_plan_synced_to_google_calendar",
+        "workout_plan_synced_to_google_calendar",
+        "calendar_oauth_pending",  # legacy
+    )
 
     if _already_pushed:
         st.success("✅ Calendar synced!")
-    elif _has_google_creds and _calendar_stage == "calendar_oauth_pending":
+    elif _has_google_creds and _calendar_sync_active:
         try:
             from agent.tools.calendar_integration import (
                 get_authorization_url, save_oauth_context, load_oauth_context as _cal_load_ctx,
@@ -1018,9 +1078,15 @@ with st.sidebar:
 
     _gfit_already_pushed = st.session_state.get("google_fit_data_pushed", False)
 
+    _gfit_sync_active = _calendar_step in (
+        "diet_plan_synced_to_google_fit",
+        "workout_plan_synced_to_google_fit",
+        "google_fit_oauth_pending",  # legacy
+    )
+
     if _gfit_already_pushed:
         st.success("✅ Google Fit synced!")
-    elif _has_google_creds and _calendar_stage == "google_fit_oauth_pending":
+    elif _has_google_creds and _gfit_sync_active:
         try:
             from agent.tools.calendar_integration import (
                 get_authorization_url as _gfit_get_auth_url,
@@ -1097,7 +1163,8 @@ for i, entry in enumerate(st.session_state.chat_history):
 # ── Profile intake form (shown when workflow is in collect_profile stage) ──
 
 _current_workflow = st.session_state.agent_state.get("workflow", {})
-if _current_workflow.get("stage") == "collect_profile" and st.session_state.profile_form_pending:
+_current_step = _current_workflow.get("step_completed") or _current_workflow.get("stage")
+if _current_step == "prompted_for_user_profile_data" and st.session_state.profile_form_pending:
     _form_domain = _current_workflow.get("domain", "diet")
     _form_existing = st.session_state.agent_state.get("user_profile", {})
     _form_required = DOMAIN_REQUIRED_FIELDS.get(_form_domain, [])
@@ -1114,17 +1181,12 @@ if _current_workflow.get("stage") == "collect_profile" and st.session_state.prof
 
     if _form_data is not None:
         st.session_state.profile_form_pending = False
-        # Populate profile from form data
+        # Populate profile in agent_state so the tool sees it in ctx.profile.
+        # Do NOT touch workflow/step_completed — the tool manages its own flow.
         st.session_state.agent_state["user_profile"].update(_form_data)
-        # Advance workflow to confirm_profile so the backend skips collection
-        # and treats the next message as a confirmation → generates the plan.
-        _wf = st.session_state.agent_state.get("workflow", {})
-        _wf["stage"] = "confirm_profile"
-        st.session_state.agent_state["workflow"] = _wf
-        # Queue a confirmation message so plan generates immediately.
-        # NOTE: avoid words like "create/make/build/plan" to prevent
-        # handle_multi_turn's stale-profile reset from wiping the form data.
-        st.session_state._pending_form_message = "Yes, I confirm these details."
+        # Send the actual form data as the user message — let the tool handle it.
+        _form_parts = [f"{k}: {v}" for k, v in _form_data.items() if v not in (None, "")]
+        st.session_state._pending_form_message = ", ".join(_form_parts)
         st.rerun()
 
 # ── Chat input ────────────────────────────────────────────────────
@@ -1198,10 +1260,11 @@ if prompt:
                         status.update(label="Generating your response...")
                         try:
                             parsed = json.loads(last_msg.content)
-                            # Check if workflow entered collect_profile — form will handle display
+                            # Check if workflow entered profile collection — form will handle display
                             _tool_state = parsed.get("state_updates", {})
                             _tool_wf = _tool_state.get("workflow", {})
-                            if _tool_wf.get("stage") == "collect_profile":
+                            _tool_step = _tool_wf.get("step_completed") or _tool_wf.get("stage")
+                            if _tool_step == "prompted_for_user_profile_data":
                                 _form_will_render = True
 
                             assistant_message = parsed.get("assistant_message")
@@ -1420,12 +1483,13 @@ if prompt:
             st.session_state.agent_state.get("calendar_sync_requested"),
         )
 
-    # ── Trigger profile form when entering collect_profile stage ──
+    # ── Trigger profile form when entering profile collection step ──
     _synced_wf = st.session_state.agent_state.get("workflow", {})
-    if _synced_wf.get("stage") == "collect_profile" and not st.session_state.profile_form_pending:
+    _synced_step = _synced_wf.get("step_completed") or _synced_wf.get("stage")
+    if _synced_step == "prompted_for_user_profile_data" and not st.session_state.profile_form_pending:
         st.session_state.profile_form_pending = True
         st.rerun()
-    elif _synced_wf.get("stage") != "collect_profile":
+    elif _synced_step != "prompted_for_user_profile_data":
         st.session_state.profile_form_pending = False
 
     # ── Persist to display history ────────────────────────────────

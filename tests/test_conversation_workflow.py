@@ -1,25 +1,27 @@
 """
 tests/test_conversation_workflow.py
 ───────────────────────────────────
-Unit tests for pure logic in conversation_workflow.py.
+Unit tests for pure logic in shared utilities (formerly conversation_workflow.py).
 No LLM calls required — tests deterministic helpers only.
 """
 
 import pytest
 
-from agent.tools.conversation_workflow import (
+from agent.shared.types import (
     BASE_PROFILE_FIELDS,
     DOMAIN_REQUIRED_FIELDS,
     FIELD_QUESTION,
     GOAL_KEYWORDS,
     SEX_MAP,
+)
+from agent.shared.profile_utils import (
     _parse_single_field,
-    append_completed_step,
     build_profile_bulk_question,
     build_profile_confirmation,
     missing_profile_fields,
     required_fields_for_domain,
 )
+from agent.shared.response_builder import append_completed_step
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
