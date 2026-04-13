@@ -8,8 +8,8 @@ for tutorial videos, and injects a "Tutorial" column directly into each
 exercise schedule table in the plan markdown.
 
 Three-tier graceful degradation:
-  1. YouTube Data API v3 (requires YOUTUBE_API_KEY)
-  2. SQLite cache (avoids redundant API calls; 30-day TTL)
+  1. Redis cache (avoids redundant API calls; 30-day TTL)
+  2. YouTube Data API v3 (requires YOUTUBE_API_KEY)
   3. Fallback YouTube search URLs (always works, no API key needed)
 """
 
@@ -19,7 +19,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -27,8 +26,8 @@ from urllib.parse import quote_plus
 
 import requests
 
+from agent.cache.redis_client import youtube_cache_get, youtube_cache_set
 from agent.config import DEFAULT_MODEL
-from agent.persistence import DB_PATH
 
 logger = logging.getLogger("fitgen.youtube")
 
@@ -45,74 +44,16 @@ _KNOWN_SHORT_EXERCISES = {
 }
 
 
-# ── SQLite cache ─────────────────────────────────────────────────
-
-def _init_youtube_cache() -> None:
-    """Create the youtube_cache table if it doesn't exist."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS youtube_cache (
-                exercise_name TEXT PRIMARY KEY,
-                video_title TEXT NOT NULL,
-                video_url TEXT NOT NULL,
-                channel_name TEXT DEFAULT '',
-                cached_at INTEGER NOT NULL
-            )
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
+# ── Redis cache wrappers ─────────────────────────────────────────
 
 def _get_cached_video(exercise: str) -> dict[str, str] | None:
-    """Return cached video dict or None if missing / expired."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute(
-            "SELECT video_title, video_url, channel_name, cached_at "
-            "FROM youtube_cache WHERE exercise_name = ?",
-            (exercise.lower(),),
-        ).fetchone()
-    finally:
-        conn.close()
-
-    if not row:
-        return None
-
-    age_days = (time.time() - row["cached_at"]) / 86400
-    if age_days > YOUTUBE_CACHE_TTL_DAYS:
-        return None  # Expired
-
-    return {
-        "title": row["video_title"],
-        "url": row["video_url"],
-        "channel": row["channel_name"],
-    }
+    """Return cached video dict from Redis, or None if missing."""
+    return youtube_cache_get(exercise)
 
 
 def _cache_video(exercise: str, title: str, url: str, channel: str = "") -> None:
-    """Upsert a video into the cache."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        conn.execute(
-            """
-            INSERT INTO youtube_cache (exercise_name, video_title, video_url, channel_name, cached_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(exercise_name) DO UPDATE SET
-                video_title = excluded.video_title,
-                video_url = excluded.video_url,
-                channel_name = excluded.channel_name,
-                cached_at = excluded.cached_at
-            """,
-            (exercise.lower(), title, url, channel, int(time.time())),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    """Store a video in the Redis cache with TTL."""
+    youtube_cache_set(exercise, title, url, channel)
 
 
 # ── Exercise extraction ──────────────────────────────────────────
@@ -345,8 +286,6 @@ def enrich_plan_with_videos(plan_text: str) -> str:
         The plan with a "Tutorial" column added to every exercise table.
         If no exercises are found, returns the plan unchanged.
     """
-    _init_youtube_cache()
-
     exercises = extract_exercise_names(plan_text)
     if not exercises:
         logger.info("[YouTube] No exercises extracted; skipping enrichment")

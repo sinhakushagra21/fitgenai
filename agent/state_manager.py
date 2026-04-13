@@ -24,6 +24,7 @@ class StateManager:
 
     context_id: str
     user_email: str
+    user_id: str
     user_profile: dict[str, Any]
     workflow: dict[str, Any]
     calendar_sync_requested: bool
@@ -41,6 +42,7 @@ class StateManager:
         workflow.update(dict(state.get("workflow") or {}))
 
         user_email = str(state.get("user_email") or persisted.get("user_email") or "")
+        user_id = str(state.get("user_id") or persisted.get("user_id") or "")
         calendar_sync_requested = bool(
             state.get("calendar_sync_requested", persisted.get("calendar_sync_requested", False))
         )
@@ -48,6 +50,7 @@ class StateManager:
         return cls(
             context_id=context_id,
             user_email=user_email,
+            user_id=user_id,
             user_profile=user_profile,
             workflow=workflow,
             calendar_sync_requested=calendar_sync_requested,

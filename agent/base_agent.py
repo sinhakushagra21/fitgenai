@@ -99,9 +99,10 @@ diet_tool), you MUST follow these rules with ZERO exceptions:
 # ── Dynamic workflow context builder ──────────────────────────────
 
 # Steps that indicate a workflow has reached its final state.
+# NOTE: "diet_confirmed" and "workout_confirmed" are NOT terminal —
+# after confirm the tool offers Google Calendar/Fit sync, so the next
+# user message (e.g. "sync to calendar") must still route to the tool.
 _TERMINAL_STEPS = frozenset({
-    "diet_confirmed",
-    "workout_confirmed",
     "diet_plan_synced_to_google_calendar",
     "diet_plan_synced_to_google_fit",
     "workout_plan_synced_to_google_calendar",
@@ -160,31 +161,39 @@ def _build_workflow_context(state: AgentState) -> str:
 
         if step_completed == "prompted_for_user_profile_data":
             lines.append(
-                f"  Hint: The {domain} tool asked the user to provide profile "
-                f"data (name, age, height, weight, etc.). The user's next "
-                f"message almost certainly contains those details. Route to "
-                f"{tool_name}."
+                f"  MANDATORY: The {domain} tool asked the user to provide "
+                f"profile data. You MUST route the user's next message to "
+                f"{tool_name}. NEVER respond directly."
             )
         elif step_completed == "user_profile_mapped":
             lines.append(
-                f"  Hint: The {domain} tool showed the user their mapped "
-                f"profile and asked for confirmation. The user will likely "
-                f"say 'yes'/'confirm' or provide corrections. Route to "
-                f"{tool_name}."
+                f"  MANDATORY: The {domain} tool showed the user their mapped "
+                f"profile and asked for confirmation. You MUST route to "
+                f"{tool_name}. NEVER respond directly."
             )
         elif step_completed in ("diet_plan_generated", "workout_plan_generated"):
             lines.append(
-                f"  Hint: A {domain} plan was generated and shown. The user "
-                f"may confirm, request changes, ask follow-up questions, or "
-                f"want to sync. Route to {tool_name} unless the user "
-                f"explicitly asks to create a plan for the OTHER domain."
+                f"  MANDATORY: A {domain} plan was generated and is awaiting "
+                f"user review. You MUST route ALL messages to {tool_name} — "
+                f"including 'yes', 'confirm', 'done', corrections, questions, "
+                f"and change requests. NEVER respond directly. The tool handles "
+                f"DB saves and sync offers that ONLY happen inside the tool."
             )
         elif step_completed in ("updated_diet_plan", "updated_workout_plan"):
             lines.append(
-                f"  Hint: The {domain} plan was just updated. The user may "
-                f"confirm, request more changes, or ask follow-ups. Route to "
-                f"{tool_name} unless the user explicitly asks for the other "
-                f"domain."
+                f"  MANDATORY: The {domain} plan was just updated and is awaiting "
+                f"user confirmation. You MUST route ALL messages to {tool_name} — "
+                f"including 'yes', 'confirm', 'done', corrections, questions, "
+                f"and change requests. NEVER respond directly. The tool handles "
+                f"DB saves and sync offers that ONLY happen inside the tool."
+            )
+        elif step_completed in ("diet_confirmed", "workout_confirmed"):
+            lines.append(
+                f"  Hint: The {domain} plan was just confirmed and the user was "
+                f"offered Google Calendar / Google Fit sync. If the user wants "
+                f"to sync, says 'yes', 'calendar', 'fit', 'both', or 'done', "
+                f"route to {tool_name}. If the user wants a plan for the OTHER "
+                f"domain, route to that tool instead."
             )
     else:
         # Workflow exists but is in a terminal state (completed).

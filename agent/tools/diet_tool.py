@@ -43,6 +43,8 @@ from agent.shared.types import (
     DIET_REQUIRED_FIELDS,
     DietIntent,
 )
+from agent.db.repositories.diet_plan_repo import DietPlanRepository
+from agent.db.repositories.user_repo import UserRepository
 from agent.state_manager import StateManager
 from agent.tracing import trace
 
@@ -68,6 +70,7 @@ class DietSessionContext:
     state_manager: StateManager
     session_id: str
     user_email: str
+    user_id: str
     profile: dict[str, Any]
     workflow: dict[str, Any]
     plan_text: str
@@ -81,11 +84,19 @@ class DietSessionContext:
         """Build context from LangGraph state via StateManager."""
         sm = StateManager.from_state(state)
         wf = dict(sm.workflow or {})
+
+        # Merge MongoDB stored profile (baseline) with session profile (overrides)
+        profile: dict[str, Any] = {}
+        if sm.user_email:
+            profile = UserRepository.get_merged_profile(sm.user_email, domain="diet")
+        profile.update(dict(sm.user_profile or {}))
+
         return cls(
             state_manager=sm,
             session_id=sm.context_id,
             user_email=sm.user_email,
-            profile=dict(sm.user_profile or {}),
+            user_id=getattr(sm, "user_id", ""),
+            profile=profile,
             workflow=wf,
             plan_text=wf.get("plan_text", ""),
             step_completed=wf.get("step_completed"),
@@ -95,6 +106,25 @@ class DietSessionContext:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+_BASE_FIELDS = frozenset({
+    "name", "age", "sex", "height_cm", "weight_kg", "goal",
+    "sleep_hours", "stress_level", "job_type",
+})
+
+
+def _split_profile_fields(
+    profile: dict[str, Any], *, domain: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a flat profile dict into (base_fields, domain_fields)."""
+    base: dict[str, Any] = {}
+    domain_specific: dict[str, Any] = {}
+    for k, v in profile.items():
+        if v in (None, ""):
+            continue
+        (base if k in _BASE_FIELDS else domain_specific)[k] = v
+    return base, domain_specific
+
 
 def _get_raw_user_query(state: dict[str, Any]) -> str:
     """Extract the last HumanMessage content from graph state messages."""
@@ -281,11 +311,23 @@ def _handle_create_diet(query: str, ctx: DietSessionContext) -> str:
       prompted_for_*  → extract/map fields, re-prompt if missing required
       user_profile_*  → generate plan, return for confirmation
     """
+    # ── Cross-domain reset: clear stale workflow from a different tool ──
+    _wf_domain = ctx.workflow.get("domain")
+    if _wf_domain and _wf_domain != _DOMAIN:
+        logger.info("[DietFlow] Resetting stale %s workflow for new diet create", _wf_domain)
+        ctx.workflow = {}
+        ctx.plan_text = ""
+        ctx.step_completed = None
+        ctx.completed_steps = []
+        ctx.pending_question = None
+
     step = ctx.step_completed
 
     # ── Step A: Fresh create or re-entering create flow ──
     if step is None or step in ("diet_confirmed", "diet_plan_generated",
-                                 "updated_diet_plan"):
+                                 "updated_diet_plan",
+                                 "diet_plan_synced_to_google_calendar",
+                                 "diet_plan_synced_to_google_fit"):
         # Extract any profile data from the initial query
         updates = extract_profile_updates_with_fallback(
             query, DIET_REQUIRED_FIELDS, DIET_ALL_FIELDS
@@ -371,6 +413,9 @@ def _handle_create_diet(query: str, ctx: DietSessionContext) -> str:
             _DOMAIN, ctx.profile, query, ctx.system_prompt
         )
 
+        # NOTE: Plan is NOT saved to MongoDB here — only on confirm.
+        # This keeps the DB clean: only confirmed plans are persisted.
+
         _update_workflow(
             ctx,
             step_completed="diet_plan_generated",
@@ -426,13 +471,41 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
             ctx,
         )
 
-    # TODO: Save user_profile in DB (skipped for now, will add later)
+    # ── Persist to MongoDB only on confirm ──
+    _plan_id = None
+    if ctx.user_email:
+        # 1. Ensure user exists in MongoDB
+        user_doc = UserRepository.find_or_create(ctx.user_email)
+        _user_id = str(user_doc["_id"])
+
+        # 2. Save / update profile (base + diet sub-docs)
+        _base, _diet = _split_profile_fields(ctx.profile, domain="diet")
+        UserRepository.update_profile(ctx.user_email, base=_base, diet=_diet)
+        logger.info("[DietFlow] Profile saved to users collection for %s", ctx.user_email)
+
+        # 3. Create confirmed plan in diet_plans collection
+        plan_text = ctx.workflow.get("plan_text", ctx.plan_text)
+        if plan_text:
+            _plan_id = DietPlanRepository.create(
+                user_id=_user_id,
+                session_id=ctx.session_id,
+                profile_snapshot=dict(ctx.profile),
+                plan_markdown=plan_text,
+                status="confirmed",
+            )
+            logger.info("[DietFlow] Plan created & confirmed: plan_id=%s", _plan_id)
+    else:
+        logger.warning(
+            "[DietFlow] confirm_diet: no user_email — skipping MongoDB save. "
+            "Set FITGEN_USER_EMAIL in .env to enable persistence."
+        )
 
     _update_workflow(
         ctx,
         step_completed="diet_confirmed",
         step_name="diet_confirmed",
         intent="confirm_diet",
+        plan_id=str(_plan_id) if _plan_id else None,
         pending_question=(
             "Would you like to sync to Google Calendar, Google Fit, or both?"
         ),
@@ -484,6 +557,8 @@ def _handle_update_diet(query: str, ctx: DietSessionContext) -> str:
         existing_plan=ctx.plan_text,
     )
 
+    # NOTE: Updated plan is NOT saved to MongoDB here — only on confirm.
+
     _update_workflow(
         ctx,
         step_completed="updated_diet_plan",
@@ -507,6 +582,14 @@ def _handle_update_diet(query: str, ctx: DietSessionContext) -> str:
 
 def _handle_get_diet(query: str, ctx: DietSessionContext) -> str:
     """Handle get_diet intent — display current plan or prompt to create."""
+    # Try to load plan from MongoDB if not in session
+    if not ctx.plan_text and ctx.user_id:
+        latest = DietPlanRepository.find_latest_by_user(ctx.user_id)
+        if latest and latest.get("plan_markdown"):
+            ctx.plan_text = latest["plan_markdown"]
+            ctx.workflow["plan_text"] = ctx.plan_text
+            ctx.workflow["plan_id"] = str(latest["_id"])
+
     if ctx.plan_text:
         plan_display = ctx.plan_text
 
@@ -566,6 +649,12 @@ def _handle_delete_diet(query: str, ctx: DietSessionContext) -> str:
     )
 
     if classification["user_intent"] == "confirm_diet":
+        # Archive plan in diet_plans collection
+        _plan_id = ctx.workflow.get("plan_id")
+        if _plan_id:
+            DietPlanRepository.archive(_plan_id)
+            logger.info("[DietFlow] Plan archived: plan_id=%s", _plan_id)
+
         # Clear everything
         ctx.profile = {}
         ctx.workflow = {}
@@ -618,6 +707,11 @@ def _handle_sync_to_google_calendar(
             profile=ctx.profile,
             sync_target="calendar",
         )
+
+        # Mark plan as calendar-synced in MongoDB
+        _plan_id = ctx.workflow.get("plan_id")
+        if _plan_id:
+            DietPlanRepository.update_plan(_plan_id, calendar_synced=True)
 
         _update_workflow(
             ctx,
@@ -672,6 +766,11 @@ def _handle_sync_to_google_fit(
             profile=ctx.profile,
             sync_target="google_fit",
         )
+
+        # Mark plan as fit-synced in MongoDB
+        _plan_id = ctx.workflow.get("plan_id")
+        if _plan_id:
+            DietPlanRepository.update_plan(_plan_id, fit_synced=True)
 
         _update_workflow(
             ctx,

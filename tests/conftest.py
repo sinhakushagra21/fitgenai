@@ -7,12 +7,10 @@ Shared fixtures for FITGEN.AI test suite.
 from __future__ import annotations
 
 import json
-import sqlite3
 from unittest.mock import MagicMock, patch
 
+import mongomock
 import pytest
-
-from agent.persistence import init_db
 
 
 @pytest.fixture
@@ -68,6 +66,7 @@ def sample_agent_state(sample_user_profile) -> dict:
         "messages": [],
         "user_profile": sample_user_profile,
         "user_email": "test@fitgen.ai",
+        "user_id": "",
         "context_id": "test_ctx_001",
         "state_id": "test_ctx_001",
         "workflow": {},
@@ -76,16 +75,30 @@ def sample_agent_state(sample_user_profile) -> dict:
 
 
 @pytest.fixture
-def tmp_db():
-    """Patch persistence._connect to use an in-memory SQLite DB."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+def mock_mongo_db():
+    """Patch the MongoDB client to use mongomock for testing.
 
-    with patch("agent.persistence._connect", return_value=conn):
-        init_db()
-        yield conn
+    Patches ``agent.db.mongo._get_client`` so every call to ``get_db()``
+    returns a mongomock database.  Yields the mock database instance.
+    """
+    client = mongomock.MongoClient()
+    db = client["fitgen_ai_test"]
 
-    conn.close()
+    with patch("agent.db.mongo._get_client", return_value=client), \
+         patch("agent.db.mongo.MONGO_DB_NAME", "fitgen_ai_test"):
+        yield db
+
+    client.close()
+
+
+@pytest.fixture
+def tmp_db(mock_mongo_db):
+    """Backwards-compatible alias for mock_mongo_db.
+
+    The old SQLite-based tests used ``tmp_db`` — this lets them work
+    with the new MongoDB backend without renaming every fixture reference.
+    """
+    return mock_mongo_db
 
 
 @pytest.fixture

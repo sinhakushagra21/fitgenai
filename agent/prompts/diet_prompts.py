@@ -201,6 +201,28 @@ Every full plan response MUST include these 8 sections in order:
 - ONE response only. No duplicates or "adjusted" versions.
 - End with disclaimer. Stop after disclaimer.
 
+## Macro Compliance (CRITICAL — applies to every plan)
+The #1 credibility killer is a Macro Summary that says one thing while \
+the actual meals add up to something completely different. EVERY eating \
+day's meals MUST land close to ALL three macro targets — not just \
+calories.
+
+- **Protein**: within 10 g of the stated daily target. Build meals \
+  PROTEIN-FIRST — place protein sources in every meal, then fill \
+  carbs/fats. If whole-food meals fall short, add whey protein shakes \
+  as explicit rows in the meal table (not footnotes).
+- **Carbs**: within 20 g of the stated daily target.
+- **Fats**: within 10 g of the stated daily target.
+- **Calories**: within 50 kcal of the stated daily target (follows \
+  automatically if macros are correct).
+
+After the 7-day meal plan, include a **Macro Audit** table:
+| Day | Cal Target | Cal Actual | Protein Target | Protein Actual | \
+Carbs Target | Carbs Actual | Fat Target | Fat Actual | ✓/✗ |
+Verify EVERY day. If any macro is out of range, go back and fix the \
+meals BEFORE presenting. Never rely on a footnote like "add whey to \
+make up the difference" — put it IN the table.
+
 ## Disclaimer
 "These recommendations are for informational purposes only. Consult a \
 registered dietitian or physician before making significant dietary \
@@ -301,8 +323,9 @@ Do NOT produce a response that looks different from the examples.
 
 3. **7-DAY MEAL PLAN** — Monday through Sunday. Each day has:
    - A fun theme title (e.g. "Mediterranean Monday", "Tex-Mex Tuesday")
-   - Breakfast, lunch, dinner, optional dessert
-   - Calorie and macro counts for EVERY meal
+   - Breakfast, lunch, dinner, snacks, optional dessert
+   - **Each meal row MUST show: Kcal | Protein (g) | Carbs (g) | Fat (g)**
+   - **Daily TOTAL row** at the bottom with all 4 macro columns summed
    - Flag batch-cook-friendly meals with a cooking emoji
    - At least 2 meals across the week that feel like treats but are \
      secretly low-cal (mark with a celebration emoji)
@@ -310,7 +333,6 @@ Do NOT produce a response that looks different from the examples.
    - Use the user's `favourite_meals` and `cooking_style` as inspiration
    - NO boring chicken-and-broccoli unless specifically requested
    - Gram weights AND household equivalents for portions
-   - Daily total row at the bottom of each day's table
 
 4. **SNACK SWAPS** — For EACH of the user's `current_snacks`, suggest \
    a healthier alternative that scratches the same itch. Sweet for \
@@ -340,13 +362,53 @@ Do NOT produce a response that looks different from the examples.
   (fat_g x 9) = stated total calories +/- 20 kcal. Verify before writing.
 - Use the Protein Targets table from the preamble to set protein. Match \
   the user's goal.
-- Each meal must show individual calorie and protein contribution.
-- Daily meal calories must sum to stated target +/- 20 kcal.
+- Each meal must show individual calorie, protein, carbs, and fat.
 - Use markdown tables for meal plans, macros, snack swaps.
 - Include gram weights AND household equivalents for portions.
 - NEVER include foods from `allergies` or `foods_to_avoid` profile fields.
 - ALWAYS respect `diet_preference`.
 - ONE response only. Stop after the disclaimer.
+
+## CRITICAL — Macro Compliance (NON-NEGOTIABLE)
+The #1 user complaint is "your macro summary says X g protein / Y g \
+carbs / Z g fat but your meals add up to completely different numbers." \
+This DESTROYS credibility. Follow these rules:
+
+1. **Every eating day's meals MUST hit ALL macro targets:**
+   - Protein: within 10 g of stated daily target
+   - Carbs: within 20 g of stated daily target
+   - Fats: within 10 g of stated daily target
+   - Calories: within 50 kcal of stated daily target
+   Example: if targets are 167 g P / 243 g C / 78 g F / 2,340 kcal, \
+   then each day must show 157-177 g P, 223-263 g C, 68-88 g F, \
+   2,290-2,390 kcal.
+
+2. **Build meals macro-aware.** Start by placing protein sources \
+   (chicken, eggs, paneer, dal, whey, curd, fish, tofu) into EVERY \
+   meal. Then add carb sources (rice, roti, oats, bread, potato, \
+   fruit) to hit the carb target. Then adjust fats (oil, ghee, nuts, \
+   cheese) to hit the fat target. Each meal table row must show \
+   Kcal | Protein | Carbs | Fat columns.
+
+3. **Use whey protein strategically.** If whole-food meals can only \
+   reach ~120-130 g protein, explicitly add 1-2 whey protein shakes \
+   (25-30 g each) AS NAMED MEALS/SNACKS in the daily table — not as a \
+   footnote or "weekly note." They must appear in the table with their \
+   macro values counted in the daily total.
+
+4. **Macro Audit — MANDATORY.** After the 7-day meal plan section, \
+   include an audit table:
+   | Day | Cal Target | Cal Actual | Protein (g) | Carbs (g) | Fat (g) | ✓/✗ |
+   Verify EVERY eating day hits ALL targets. If any macro is out of \
+   range, go back and fix the meals BEFORE presenting. Do NOT present \
+   a plan with shortfalls and a footnote saying "add whey / adjust \
+   portions to make up the difference."
+
+5. **Vegetarian/fasting days are harder — plan extra carefully.** On \
+   pure-veg days (no eggs/meat), use paneer (18 g P/100 g), curd \
+   (10 g P/200 g), dal (18-24 g P/cup cooked), besan (22 g P/100 g), \
+   soy chunks (52 g P/100 g), tofu (17 g P/150 g), whey. Build those \
+   days first, since they need the most attention.
 
 <examples>
 

@@ -116,6 +116,9 @@ DIET_ALL_FIELDS: list[str] = DIET_REQUIRED_FIELDS + DIET_OPTIONAL_FIELDS
 WORKOUT_REQUIRED_FIELDS: list[str] = [
     "name",
     "age",
+    "sex",
+    "height_cm",
+    "weight_kg",
     "goal",
     "experience_level",
     "training_days_per_week",

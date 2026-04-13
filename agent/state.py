@@ -35,6 +35,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     user_profile: dict[str, Any]
     user_email: str
+    user_id: str
     context_id: str
     state_id: str
     workflow: dict[str, Any]

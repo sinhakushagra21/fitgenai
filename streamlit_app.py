@@ -40,6 +40,7 @@ from agent.config import DEFAULT_MODEL, FAST_MODEL
 from agent.prompts.base_prompts import BASE_PROMPTS
 from agent.prompts.techniques import TECHNIQUE_KEYS, TECHNIQUE_META
 from agent.shared.types import DOMAIN_REQUIRED_FIELDS
+from agent.db.repositories.user_repo import UserRepository
 
 
 # ── Log capture ───────────────────────────────────────────────────
@@ -388,11 +389,116 @@ hr {
 ::-webkit-scrollbar-track { background: var(--bg-dark); }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* ── AI Response Content Enhancement ───────────────── */
+
+/* Section headings inside responses */
+.stChatMessage h2, .stChatMessage h3, .stChatMessage h4 {
+    color: var(--accent-orange) !important;
+    font-weight: 700 !important;
+    margin-top: 1.2rem !important;
+    margin-bottom: 0.4rem !important;
+    padding-bottom: 0.3rem !important;
+    border-bottom: 1px solid rgba(255, 107, 43, 0.12) !important;
+    font-size: 1rem !important;
+    letter-spacing: 0.01em !important;
+}
+.stChatMessage h2 { font-size: 1.1rem !important; }
+
+/* Bold exercise / food names */
+.stChatMessage strong {
+    color: #f0f0f0 !important;
+    font-weight: 700 !important;
+}
+
+/* Ordered lists (exercises) */
+.stChatMessage ol {
+    counter-reset: item;
+    list-style: none !important;
+    padding-left: 0 !important;
+    margin: 0.5rem 0 !important;
+}
+.stChatMessage ol > li {
+    counter-increment: item;
+    position: relative;
+    padding: 0.65rem 0.9rem 0.65rem 2.8rem !important;
+    margin-bottom: 0.35rem !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(255, 255, 255, 0.04) !important;
+    border-radius: 12px !important;
+    border-left: 3px solid var(--accent-orange) !important;
+    transition: background 0.2s ease;
+}
+.stChatMessage ol > li:hover {
+    background: rgba(255, 107, 43, 0.04) !important;
+}
+.stChatMessage ol > li::before {
+    content: counter(item);
+    position: absolute;
+    left: 0.75rem;
+    top: 0.7rem;
+    width: 1.4rem;
+    height: 1.4rem;
+    background: linear-gradient(135deg, rgba(255,107,43,0.2), rgba(230,57,70,0.15));
+    color: var(--accent-orange);
+    font-size: 0.75rem;
+    font-weight: 800;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+/* Nested bullet points (exercise details) */
+.stChatMessage ul {
+    padding-left: 1.2rem !important;
+    margin: 0.3rem 0 0.2rem 0 !important;
+}
+.stChatMessage ul > li {
+    color: var(--text-secondary) !important;
+    font-size: 0.88rem !important;
+    line-height: 1.55 !important;
+    padding: 0.1rem 0 !important;
+    list-style-type: none !important;
+    position: relative;
+    padding-left: 1rem !important;
+}
+.stChatMessage ul > li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.55rem;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #555;
+}
+
+/* Paragraph text */
+.stChatMessage p {
+    line-height: 1.65 !important;
+    margin-bottom: 0.5rem !important;
+}
+
+/* Streaming cursor */
+.streaming-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    background: var(--accent-orange);
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    animation: blink 0.8s step-end infinite;
+}
+@keyframes blink {
+    50% { opacity: 0; }
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Load env ──────────────────────────────────────────────────────
-load_dotenv()
+load_dotenv(override=True)
 init_db()
 
 if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENAI_API_KEY"):
@@ -402,147 +508,402 @@ if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENAI_API_KEY"):
     )
     st.stop()
 
-# ── Google Calendar OAuth callback handler ────────────────────────
+# ── Auto-detect server port for OAuth redirect ──────────────────
+# When multiple Streamlit apps run concurrently (8501, 8502, …), the
+# redirect URI MUST match the port *this* app is listening on.
+try:
+    from streamlit import config as _st_config
+    _server_port = _st_config.get_option("server.port") or 8501
+except Exception:
+    _server_port = 8501
+_OAUTH_REDIRECT_URI = f"http://localhost:{_server_port}"
+
+# ── Google OAuth callback handler ───────────────────────────────
 # When Google redirects back with ?code=..., intercept it here.
+# The ``state`` parameter distinguishes login vs. calendar callbacks.
 
 _gcal_params = st.query_params
 if "code" in _gcal_params:
     _gcal_code = _gcal_params.get("code", "")
-    # Clear query params immediately to prevent re-processing on rerun.
-    st.query_params.clear()
+    _oauth_state = _gcal_params.get("state", "")
 
-    _gcal_logger = logging.getLogger("fitgen.calendar.streamlit")
-    _gcal_logger.info("[Calendar] Received OAuth code, exchanging for tokens…")
+    # ── Login OAuth callback ────────────────────────────────────
+    if _oauth_state.startswith("login_"):
+        st.query_params.clear()
+        _login_logger = logging.getLogger("fitgen.auth.streamlit")
+        _login_logger.info("[Auth] Received login OAuth code (state=%s…)", _oauth_state[:20])
+        try:
+            from agent.auth.google_auth import GoogleAuthProvider
+            _auth_provider = GoogleAuthProvider(redirect_uri=_OAUTH_REDIRECT_URI)
+            _auth_user = _auth_provider.handle_callback(_gcal_code)
+            # Store authenticated user in session
+            st.session_state["authenticated"] = True
+            st.session_state["auth_user_email"] = _auth_user.email
+            st.session_state["auth_user_name"] = _auth_user.name
+            st.session_state["auth_user_picture"] = _auth_user.picture
+            _login_logger.info("[Auth] Login successful: %s", _auth_user.email)
+            st.rerun()
+        except Exception as _auth_err:
+            _login_logger.error("[Auth] Login failed: %s", _auth_err, exc_info=True)
+            st.error(f"Login failed: {_auth_err}")
+            st.stop()
 
-    try:
-        from agent.tools.calendar_integration import (
-            clear_oauth_context,
-            exchange_code_for_tokens,
-            extract_calendar_events,
-            load_oauth_context,
-            push_events_to_calendar,
+    # ── Calendar / Fit OAuth callback ───────────────────────────
+    else:
+        # Clear query params immediately to prevent re-processing on rerun.
+        st.query_params.clear()
+
+        _gcal_logger = logging.getLogger("fitgen.calendar.streamlit")
+        _gcal_logger.info("[Calendar] Received OAuth code, exchanging for tokens…")
+
+        try:
+            from agent.tools.calendar_integration import (
+                clear_oauth_context,
+                exchange_code_for_tokens,
+                extract_calendar_events,
+                load_oauth_context,
+                push_events_to_calendar,
+            )
+
+            with st.spinner("🔐 Exchanging authorization code..."):
+                # Exchange auth code for tokens (PKCE is disabled — no code_verifier needed).
+                tokens = exchange_code_for_tokens(_gcal_code)
+
+            st.info("✅ Google authorization successful! Processing your plan...")
+
+            # Load plan data from persisted context file (survives the redirect).
+            # Fall back to session state if context file was empty.
+            _oauth_ctx = load_oauth_context()
+            _wf = st.session_state.get("agent_state", {}).get("workflow", {})
+            _plan_text = _oauth_ctx.get("plan_text") or _wf.get("plan_text", "")
+            _domain = _oauth_ctx.get("domain") or _wf.get("domain", "diet")
+            _profile = _oauth_ctx.get("profile") or st.session_state.get("agent_state", {}).get("user_profile", {})
+
+            _sync_target = _oauth_ctx.get("sync_target", "calendar")
+            _gcal_logger.info("[Calendar] sync_target=%s, plan_len=%d, domain=%s, profile_keys=%s",
+                              _sync_target, len(_plan_text), _domain,
+                              sorted(_profile.keys()) if _profile else "empty")
+            _gcal_logger.info("[Calendar] plan_text preview: %s", _plan_text[:200] if _plan_text else "(empty)")
+
+            if _plan_text:
+                # ── Google Calendar sync ──
+                if _sync_target in ("calendar", "both"):
+                    with st.spinner("📅 Extracting calendar events from your plan..."):
+                        events = extract_calendar_events(_plan_text, _domain, _profile)
+                    if events:
+                        with st.spinner(f"📅 Pushing {len(events)} events to Google Calendar..."):
+                            created_count = push_events_to_calendar(events, tokens)
+                        st.success(
+                            f"📅 **{created_count} events** synced to your Google Calendar! "
+                            f"Check your calendar for recurring {_domain} reminders starting tomorrow."
+                        )
+                        _gcal_logger.info("[Calendar] Pushed %d events successfully", created_count)
+                        st.session_state["calendar_events_pushed"] = True
+                    else:
+                        st.warning("⚠️ Connected to Google Calendar, but couldn't extract events from your plan.")
+
+                # ── Google Fit sync ──
+                if _sync_target in ("google_fit", "both"):
+                    from agent.tools.google_fit_integration import (
+                        extract_nutrition_data,
+                        extract_activity_sessions,
+                        push_nutrition_to_google_fit,
+                        push_activities_to_google_fit,
+                    )
+                    if _domain == "diet":
+                        _gcal_logger.info("[GoogleFit] About to extract nutrition: plan_len=%d, profile_keys=%s",
+                                          len(_plan_text), sorted(_profile.keys()) if _profile else "empty")
+                        nutrition = None
+                        for _attempt in range(1, 3):  # 2 attempts
+                            with st.spinner(f"💪 Extracting nutrition data (attempt {_attempt}/2)..."):
+                                try:
+                                    nutrition = extract_nutrition_data(_plan_text, _domain, _profile)
+                                except Exception as _ext_err:
+                                    _gcal_logger.error("[GoogleFit] Extraction attempt %d failed: %s",
+                                                        _attempt, _ext_err, exc_info=True)
+                                    nutrition = []
+                            if nutrition:
+                                break
+                            _gcal_logger.warning("[GoogleFit] Extraction attempt %d returned 0 entries", _attempt)
+
+                        _gcal_logger.info("[GoogleFit] Final extraction: %d entries", len(nutrition) if nutrition else 0)
+                        if nutrition:
+                            st.info(f"Found {len(nutrition)} meals. Pushing to Google Fit...")
+                            with st.spinner(f"💪 Pushing {len(nutrition)} meals to Google Fit..."):
+                                fit_count, fit_errors = push_nutrition_to_google_fit(nutrition, tokens)
+                            st.session_state["_gfit_push_count"] = fit_count
+                            if fit_count > 0:
+                                st.success(
+                                    f"💪 **{fit_count} nutrition entries** synced to Google Fit! "
+                                    f"Check the Google Fit app for your meal data."
+                                )
+                            if fit_errors:
+                                st.warning(
+                                    f"⚠️ {len(fit_errors)} entries failed:\n"
+                                    + "\n".join(f"- {e}" for e in fit_errors[:5])
+                                )
+                            if fit_count == 0 and not fit_errors:
+                                st.warning("⚠️ No entries were pushed. Check the logs for details.")
+                            _gcal_logger.info("[GoogleFit] Pushed %d nutrition entries, %d errors", fit_count, len(fit_errors))
+                        else:
+                            st.warning(
+                                f"⚠️ Connected to Google Fit, but couldn't extract nutrition data.\n\n"
+                                f"**Debug**: plan_text length = {len(_plan_text)}, domain = {_domain}, "
+                                f"profile fields = {len(_profile)} — check Logs panel for details."
+                            )
+                    elif _domain == "workout":
+                        with st.spinner("💪 Extracting workout sessions from your plan..."):
+                            sessions = extract_activity_sessions(_plan_text, _domain, _profile)
+                        _gcal_logger.info("[GoogleFit] Extracted %d activity sessions", len(sessions) if sessions else 0)
+                        if sessions:
+                            st.info(f"Found {len(sessions)} workout sessions. Pushing to Google Fit...")
+                            with st.spinner(f"💪 Pushing {len(sessions)} sessions to Google Fit..."):
+                                fit_count, fit_errors = push_activities_to_google_fit(sessions, tokens)
+                            st.session_state["_gfit_push_count"] = fit_count
+                            if fit_count > 0:
+                                st.success(
+                                    f"💪 **{fit_count} workout sessions** synced to Google Fit! "
+                                    f"Check the Google Fit app for your activity data."
+                                )
+                            if fit_errors:
+                                st.warning(
+                                    f"⚠️ {len(fit_errors)} sessions failed:\n"
+                                    + "\n".join(f"- {e}" for e in fit_errors[:5])
+                                )
+                            _gcal_logger.info("[GoogleFit] Pushed %d sessions, %d errors", fit_count, len(fit_errors))
+                        else:
+                            st.warning("⚠️ Connected to Google Fit, but couldn't extract activity sessions from your plan.")
+                    _gfit_actually_pushed = st.session_state.get("_gfit_push_count", 0) > 0
+                    st.session_state["google_fit_data_pushed"] = _gfit_actually_pushed
+
+                # Store tokens and clean up.
+                st.session_state["google_calendar_tokens"] = tokens
+                clear_oauth_context()
+            else:
+                st.warning("⚠️ Connected to Google, but no plan text found. Create a plan first, then sync.")
+
+        except Exception as e:
+            st.error(f"❌ Sync failed: {e}")
+            _gcal_logger.error("[Calendar] OAuth or push failed: %s", e, exc_info=True)
+
+# ── Authentication gate ───────────────────────────────────────────
+# Resolve the current user email: either from Google OAuth login or
+# the FITGEN_USER_EMAIL env var (dev bypass).
+
+_dev_email = os.getenv("FITGEN_USER_EMAIL", "").strip()
+
+# Check if the user is already authenticated (OAuth login or dev bypass)
+_is_authenticated = st.session_state.get("authenticated", False)
+
+if not _is_authenticated:
+    # Check if Google OAuth is configured
+    from agent.auth.google_auth import GoogleAuthProvider
+    _google_auth = GoogleAuthProvider(redirect_uri=_OAUTH_REDIRECT_URI)
+
+    # ── Login page CSS ────────────────────────────────────────────
+    # NOTE: Streamlit wraps each st.markdown / st.button in its own
+    # container, so we CANNOT nest native widgets inside a custom HTML
+    # div.  Instead we style the page-level containers directly.
+    st.markdown("""
+    <style>
+    /* ── Login: hide chrome ──────────────────────────── */
+    section[data-testid="stSidebar"]  { display: none !important; }
+    header[data-testid="stHeader"]    { display: none !important; }
+    #MainMenu, footer                 { display: none !important; }
+
+    /* ── Login: animated background on .stApp ─────────── */
+    @keyframes blob1 {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        33%      { transform: translate(30px, -50px) scale(1.1); }
+        66%      { transform: translate(-20px, 20px) scale(0.9); }
+    }
+    @keyframes blob2 {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        33%      { transform: translate(-40px, 30px) scale(1.15); }
+        66%      { transform: translate(25px, -40px) scale(0.85); }
+    }
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(30px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes subtlePulse {
+        0%, 100% { opacity: 0.85; }
+        50%      { opacity: 1; }
+    }
+
+    .stApp::before {
+        content: '';
+        position: fixed; top: -10%; right: -5%;
+        width: 600px; height: 600px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(255,107,43,0.15) 0%, transparent 70%);
+        filter: blur(80px);
+        animation: blob1 15s ease-in-out infinite;
+        pointer-events: none; z-index: 0;
+    }
+    .stApp::after {
+        content: '';
+        position: fixed; bottom: -10%; left: -5%;
+        width: 500px; height: 500px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(230,57,70,0.10) 0%, transparent 70%);
+        filter: blur(80px);
+        animation: blob2 18s ease-in-out infinite;
+        pointer-events: none; z-index: 0;
+    }
+
+    /* ── Login: center column acts as card ────────────── */
+    [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
+        max-width: 460px;
+        margin: 0 auto;
+        padding-top: 6vh;
+        animation: fadeInUp 0.8s ease-out;
+        position: relative;
+        z-index: 1;
+    }
+
+    /* ── Login: Google button (white, prominent) ─────── */
+    a[data-testid="baseLinkButton-secondary"] {
+        background: #ffffff !important;
+        color: #1a1a1a !important;
+        border: none !important;
+        border-radius: 12px !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        padding: 0.78rem 1.5rem !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 2px 15px rgba(0,0,0,0.2) !important;
+        text-decoration: none !important;
+    }
+    a[data-testid="baseLinkButton-secondary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 30px rgba(255,255,255,0.08) !important;
+    }
+    a[data-testid="baseLinkButton-secondary"] p {
+        color: #1a1a1a !important;
+        font-weight: 700 !important;
+    }
+
+    /* ── Login: dev button (subtle, dashed) ──────────── */
+    button[data-testid="baseButton-secondary"] {
+        background: transparent !important;
+        color: #666 !important;
+        border: 1px dashed #333 !important;
+        border-radius: 10px !important;
+        font-weight: 500 !important;
+        font-size: 0.82rem !important;
+        padding: 0.55rem 1rem !important;
+        transition: all 0.3s ease !important;
+        letter-spacing: 0.01em !important;
+    }
+    button[data-testid="baseButton-secondary"]:hover {
+        border-color: #555 !important;
+        color: #999 !important;
+        background: rgba(255,255,255,0.03) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Login page layout ─────────────────────────────────────────
+    # Glass-morphism card (entire block via CSS, content via markdown)
+    st.markdown(
+        '<div style="'
+        'background:rgba(22,22,22,0.65);'
+        'backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);'
+        'border:1px solid rgba(255,107,43,0.10);'
+        'border-radius:28px;'
+        'padding:2.5rem 2.5rem 1rem 2.5rem;'
+        'box-shadow:0 8px 40px rgba(0,0,0,0.35),0 0 80px rgba(255,107,43,0.03);'
+        '">'
+        # ── Logo icon
+        '<div style="'
+        'width:68px;height:68px;margin:0 auto 1.2rem auto;'
+        'display:flex;align-items:center;justify-content:center;'
+        'background:linear-gradient(135deg,rgba(255,107,43,0.14),rgba(230,57,70,0.14));'
+        'border-radius:20px;border:1px solid rgba(255,107,43,0.18);'
+        'font-size:1.9rem;animation:subtlePulse 3s ease-in-out infinite;'
+        '">&#x1F525;</div>'
+        # ── Title
+        '<div style="'
+        'font-family:Inter,sans-serif;font-size:2.2rem;font-weight:900;'
+        'text-align:center;letter-spacing:-0.02em;margin-bottom:0.3rem;'
+        'background:linear-gradient(135deg,#ff6b2b 0%,#ff8f5e 40%,#e63946 100%);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
+        'background-clip:text;'
+        '">FITGEN.AI</div>'
+        # ── Subtitle
+        '<div style="text-align:center;color:#777;font-size:0.92rem;'
+        'margin-bottom:0.2rem;">Your AI-powered personal fitness coach</div>'
+        # ── Feature pills
+        '<div style="display:flex;flex-wrap:wrap;justify-content:center;'
+        'gap:0.4rem;margin:1.2rem 0 1.5rem 0;">'
+        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
+        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
+        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
+        'Workout Plans</span>'
+        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
+        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
+        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
+        'Diet &amp; Nutrition</span>'
+        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
+        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
+        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
+        'Macro Tracking</span>'
+        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
+        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
+        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
+        'Calendar Sync</span>'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Google sign-in button (native Streamlit widget, styled white via CSS)
+    if _google_auth.is_configured:
+        _login_url = _google_auth.get_login_url()
+        st.link_button(
+            "\U0001f310  Sign in with Google",
+            _login_url,
+            use_container_width=True,
+        )
+    else:
+        st.warning(
+            "Google OAuth not configured. "
+            "Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`."
         )
 
-        with st.spinner("🔐 Exchanging authorization code..."):
-            # Exchange auth code for tokens (PKCE is disabled — no code_verifier needed).
-            tokens = exchange_code_for_tokens(_gcal_code)
+    # "or" divider + dev button
+    if _dev_email:
+        st.markdown(
+            '<div style="display:flex;align-items:center;gap:1rem;'
+            'margin:0.6rem 0 0.4rem 0;">'
+            '<div style="flex:1;height:1px;'
+            'background:linear-gradient(90deg,transparent,#333,transparent);"></div>'
+            '<span style="color:#555;font-size:0.72rem;font-weight:500;'
+            'text-transform:uppercase;letter-spacing:0.1em;">or</span>'
+            '<div style="flex:1;height:1px;'
+            'background:linear-gradient(90deg,transparent,#333,transparent);"></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign in as Dev", use_container_width=True):
+            st.session_state["authenticated"] = True
+            st.session_state["auth_user_email"] = _dev_email
+            st.session_state["auth_user_name"] = _dev_email.split("@")[0]
+            st.session_state["auth_user_picture"] = ""
+            st.rerun()
 
-        st.info("✅ Google authorization successful! Processing your plan...")
+    # Footer
+    st.markdown(
+        '<div style="text-align:center;color:#3a3a3a;font-size:0.7rem;'
+        'margin-top:1.5rem;letter-spacing:0.01em;">'
+        'Powered by OpenAI &middot; LangGraph &middot; MongoDB Atlas'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-        # Load plan data from persisted context file (survives the redirect).
-        # Fall back to session state if context file was empty.
-        _oauth_ctx = load_oauth_context()
-        _wf = st.session_state.get("agent_state", {}).get("workflow", {})
-        _plan_text = _oauth_ctx.get("plan_text") or _wf.get("plan_text", "")
-        _domain = _oauth_ctx.get("domain") or _wf.get("domain", "diet")
-        _profile = _oauth_ctx.get("profile") or st.session_state.get("agent_state", {}).get("user_profile", {})
+    st.stop()  # ← block everything below until authenticated
 
-        _sync_target = _oauth_ctx.get("sync_target", "calendar")
-        _gcal_logger.info("[Calendar] sync_target=%s, plan_len=%d, domain=%s, profile_keys=%s",
-                          _sync_target, len(_plan_text), _domain,
-                          sorted(_profile.keys()) if _profile else "empty")
-        _gcal_logger.info("[Calendar] plan_text preview: %s", _plan_text[:200] if _plan_text else "(empty)")
-
-        if _plan_text:
-            # ── Google Calendar sync ──
-            if _sync_target in ("calendar", "both"):
-                with st.spinner("📅 Extracting calendar events from your plan..."):
-                    events = extract_calendar_events(_plan_text, _domain, _profile)
-                if events:
-                    with st.spinner(f"📅 Pushing {len(events)} events to Google Calendar..."):
-                        created_count = push_events_to_calendar(events, tokens)
-                    st.success(
-                        f"📅 **{created_count} events** synced to your Google Calendar! "
-                        f"Check your calendar for recurring {_domain} reminders starting tomorrow."
-                    )
-                    _gcal_logger.info("[Calendar] Pushed %d events successfully", created_count)
-                    st.session_state["calendar_events_pushed"] = True
-                else:
-                    st.warning("⚠️ Connected to Google Calendar, but couldn't extract events from your plan.")
-
-            # ── Google Fit sync ──
-            if _sync_target in ("google_fit", "both"):
-                from agent.tools.google_fit_integration import (
-                    extract_nutrition_data,
-                    extract_activity_sessions,
-                    push_nutrition_to_google_fit,
-                    push_activities_to_google_fit,
-                )
-                if _domain == "diet":
-                    _gcal_logger.info("[GoogleFit] About to extract nutrition: plan_len=%d, profile_keys=%s",
-                                      len(_plan_text), sorted(_profile.keys()) if _profile else "empty")
-                    nutrition = None
-                    for _attempt in range(1, 3):  # 2 attempts
-                        with st.spinner(f"💪 Extracting nutrition data (attempt {_attempt}/2)..."):
-                            try:
-                                nutrition = extract_nutrition_data(_plan_text, _domain, _profile)
-                            except Exception as _ext_err:
-                                _gcal_logger.error("[GoogleFit] Extraction attempt %d failed: %s",
-                                                    _attempt, _ext_err, exc_info=True)
-                                nutrition = []
-                        if nutrition:
-                            break
-                        _gcal_logger.warning("[GoogleFit] Extraction attempt %d returned 0 entries", _attempt)
-
-                    _gcal_logger.info("[GoogleFit] Final extraction: %d entries", len(nutrition) if nutrition else 0)
-                    if nutrition:
-                        st.info(f"Found {len(nutrition)} meals. Pushing to Google Fit...")
-                        with st.spinner(f"💪 Pushing {len(nutrition)} meals to Google Fit..."):
-                            fit_count, fit_errors = push_nutrition_to_google_fit(nutrition, tokens)
-                        st.session_state["_gfit_push_count"] = fit_count
-                        if fit_count > 0:
-                            st.success(
-                                f"💪 **{fit_count} nutrition entries** synced to Google Fit! "
-                                f"Check the Google Fit app for your meal data."
-                            )
-                        if fit_errors:
-                            st.warning(
-                                f"⚠️ {len(fit_errors)} entries failed:\n"
-                                + "\n".join(f"- {e}" for e in fit_errors[:5])
-                            )
-                        if fit_count == 0 and not fit_errors:
-                            st.warning("⚠️ No entries were pushed. Check the logs for details.")
-                        _gcal_logger.info("[GoogleFit] Pushed %d nutrition entries, %d errors", fit_count, len(fit_errors))
-                    else:
-                        st.warning(
-                            f"⚠️ Connected to Google Fit, but couldn't extract nutrition data.\n\n"
-                            f"**Debug**: plan_text length = {len(_plan_text)}, domain = {_domain}, "
-                            f"profile fields = {len(_profile)} — check Logs panel for details."
-                        )
-                elif _domain == "workout":
-                    with st.spinner("💪 Extracting workout sessions from your plan..."):
-                        sessions = extract_activity_sessions(_plan_text, _domain, _profile)
-                    _gcal_logger.info("[GoogleFit] Extracted %d activity sessions", len(sessions) if sessions else 0)
-                    if sessions:
-                        st.info(f"Found {len(sessions)} workout sessions. Pushing to Google Fit...")
-                        with st.spinner(f"💪 Pushing {len(sessions)} sessions to Google Fit..."):
-                            fit_count, fit_errors = push_activities_to_google_fit(sessions, tokens)
-                        st.session_state["_gfit_push_count"] = fit_count
-                        if fit_count > 0:
-                            st.success(
-                                f"💪 **{fit_count} workout sessions** synced to Google Fit! "
-                                f"Check the Google Fit app for your activity data."
-                            )
-                        if fit_errors:
-                            st.warning(
-                                f"⚠️ {len(fit_errors)} sessions failed:\n"
-                                + "\n".join(f"- {e}" for e in fit_errors[:5])
-                            )
-                        _gcal_logger.info("[GoogleFit] Pushed %d sessions, %d errors", fit_count, len(fit_errors))
-                    else:
-                        st.warning("⚠️ Connected to Google Fit, but couldn't extract activity sessions from your plan.")
-                _gfit_actually_pushed = st.session_state.get("_gfit_push_count", 0) > 0
-                st.session_state["google_fit_data_pushed"] = _gfit_actually_pushed
-
-            # Store tokens and clean up.
-            st.session_state["google_calendar_tokens"] = tokens
-            clear_oauth_context()
-        else:
-            st.warning("⚠️ Connected to Google, but no plan text found. Create a plan first, then sync.")
-
-    except Exception as e:
-        st.error(f"❌ Sync failed: {e}")
-        _gcal_logger.error("[Calendar] OAuth or push failed: %s", e, exc_info=True)
+# ── Resolve authenticated user email ─────────────────────────────
+_active_email = st.session_state.get("auth_user_email", "") or _dev_email
 
 # ── Session state init ────────────────────────────────────────────
 
@@ -550,14 +911,28 @@ if "graph" not in st.session_state:
     st.session_state.graph = create_graph()
 
 if "agent_state" not in st.session_state:
-    user_email = os.getenv("FITGEN_USER_EMAIL", "").strip()
+    user_email = _active_email
     context_id = os.getenv("FITGEN_CONTEXT_ID", str(uuid.uuid4()))
     restored = get_context_state(context_id) or get_latest_context_state_by_email(user_email) or {}
     context_id = restored.get("context_id", context_id)
+
+    # Load existing user profile from MongoDB (do NOT create user doc here —
+    # the user doc is only created on plan confirm in the tool handlers).
+    user_id = ""
+    mongo_profile: dict = {}
+    if user_email:
+        existing_user = UserRepository.find_by_email(user_email)
+        if existing_user:
+            user_id = str(existing_user["_id"])
+            mongo_profile = UserRepository.get_merged_profile(user_email)
+
+    merged_profile = {**mongo_profile, **restored.get("user_profile", {})}
+
     st.session_state.agent_state = {
         "messages": [],
-        "user_profile": restored.get("user_profile", {}),
+        "user_profile": merged_profile,
         "user_email": user_email or restored.get("user_email", ""),
+        "user_id": user_id,
         "context_id": context_id,
         "state_id": context_id,
         "workflow": restored.get("workflow", {}),
@@ -614,6 +989,46 @@ def _copy_button(text: str, key: str) -> None:
         """,
         height=38,
     )
+
+
+def _stream_response(text: str, placeholder) -> None:
+    """Simulate streaming by revealing text progressively with a cursor.
+
+    Adapts speed to content length:
+      - Short  (<60 words):  word-by-word,  ~16 ms
+      - Medium (60-300):      2-word chunks, ~12 ms
+      - Long   (>300 words):  4-word chunks, ~10 ms
+
+    Uses a blinking cursor (▌) during streaming for a ChatGPT-like feel.
+    """
+    import time as _time
+
+    words = text.split(" ")
+    total = len(words)
+    if total == 0:
+        placeholder.markdown(text)
+        return
+
+    # Adaptive speed — snappy but readable
+    if total < 60:
+        chunk_size, delay = 1, 0.016
+    elif total < 300:
+        chunk_size, delay = 2, 0.012
+    else:
+        chunk_size, delay = 4, 0.010
+
+    accumulated: list[str] = []
+
+    for i, word in enumerate(words):
+        accumulated.append(word)
+        # Render on every chunk_size-th word, or on the last word
+        if (i + 1) % chunk_size == 0 or i == total - 1:
+            display = " ".join(accumulated)
+            if i < total - 1:
+                placeholder.markdown(display + " ▌")
+            else:
+                placeholder.markdown(display)
+            _time.sleep(delay)
 
 
 def _render_plan(plan_text: str) -> None:
@@ -919,6 +1334,27 @@ with st.sidebar:
     )
     st.divider()
 
+    # ── User info ─────────────────────────────────────────────
+    _sidebar_name = st.session_state.get("auth_user_name", "")
+    _sidebar_email = st.session_state.get("auth_user_email", "")
+    if _sidebar_email:
+        _display = _sidebar_name or _sidebar_email.split("@")[0]
+        st.markdown(
+            f'<div class="stat-card">'
+            f'<div class="stat-card-label">Signed in as</div>'
+            f'<div style="color:var(--text-primary);font-size:0.9rem;font-weight:600;">{_display}</div>'
+            f'<div style="color:var(--text-muted);font-size:0.75rem;">{_sidebar_email}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Logout", use_container_width=True, key="logout_btn"):
+            for _k in ("authenticated", "auth_user_email", "auth_user_name",
+                        "auth_user_picture", "agent_state", "chat_history",
+                        "profile_form_pending", "graph"):
+                st.session_state.pop(_k, None)
+            st.rerun()
+        st.divider()
+
     # ── Workflow Progress ──────────────────────────────────────
     st.markdown("## 📊 Session")
     _workflow = st.session_state.agent_state.get("workflow", {})
@@ -1012,6 +1448,7 @@ with st.sidebar:
             "messages": [],
             "user_profile": {},
             "user_email": st.session_state.agent_state.get("user_email", ""),
+            "user_id": st.session_state.agent_state.get("user_id", ""),
             "context_id": context_id,
             "state_id": context_id,
             "workflow": {},
@@ -1228,8 +1665,72 @@ if prompt:
         tool_direct_reply = False
         _form_will_render = False   # suppress display when form takes over
 
+        # Rotating status phrases per stage — cycled by a background thread
+        import threading, time as _time, itertools
+        _STATUS_THINKING = itertools.cycle([
+            "Thinking...",
+            "Understanding your question...",
+            "Analyzing your request...",
+        ])
+        _STATUS_TOOL: dict[str, list[str]] = {
+            "workout_tool": [
+                "Consulting Workout Coach...",
+                "Reviewing exercise science...",
+                "Designing your routine...",
+                "Selecting optimal exercises...",
+                "Building your workout plan...",
+                "Personalizing for your goals...",
+            ],
+            "diet_tool": [
+                "Consulting Diet Coach...",
+                "Analyzing nutritional needs...",
+                "Designing your meal plan...",
+                "Balancing your macros...",
+                "Building your diet plan...",
+                "Personalizing for your goals...",
+            ],
+        }
+        _STATUS_DEFAULT_TOOL = [
+            "Consulting specialist...",
+            "Working on your request...",
+            "Preparing your answer...",
+        ]
+        _STATUS_GENERATING = [
+            "Crafting your personalized response...",
+            "Polishing the details...",
+            "Putting it all together...",
+            "Almost there...",
+        ]
+
+        _status_phase = "thinking"   # thinking → tool → generating
+        _status_stop = threading.Event()
+
+        def _rotate_status(st_status):
+            """Background thread: rotate status label every 1.8 s."""
+            _tool_cycle = None
+            _gen_cycle = itertools.cycle(_STATUS_GENERATING)
+            while not _status_stop.is_set():
+                _status_stop.wait(1.8)
+                if _status_stop.is_set():
+                    break
+                try:
+                    if _status_phase == "thinking":
+                        st_status.update(label=next(_STATUS_THINKING))
+                    elif _status_phase == "tool":
+                        if _tool_cycle is None:
+                            phrases = _STATUS_TOOL.get(tool_used, _STATUS_DEFAULT_TOOL)
+                            _tool_cycle = itertools.cycle(phrases)
+                        st_status.update(label=next(_tool_cycle))
+                    elif _status_phase == "generating":
+                        st_status.update(label=next(_gen_cycle))
+                except Exception:
+                    pass
+
         try:
-          with st.status("Analyzing your request...", expanded=False) as status:
+          with st.status("Thinking...", expanded=False) as status:
+            _rotator = threading.Thread(target=_rotate_status, args=(status,), daemon=True)
+            _rotator.start()
+
             event_count = 0
             for event in st.session_state.graph.stream(
                 st.session_state.agent_state, stream_mode="values"
@@ -1250,14 +1751,16 @@ if prompt:
                     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls and not tool_used:
                         tool_used = last_msg.tool_calls[0]["name"]
                         tool_label, _, _ = TOOL_LABELS.get(tool_used, ("Specialist", "", "#333"))
-                        status.update(label=f"Routing to {tool_label}...")
+                        _status_phase = "tool"
+                        status.update(label=f"Consulting {tool_label}...")
                         badge_placeholder.markdown(_badge(tool_used), unsafe_allow_html=True)
                         _ui_logger.info("[Turn %s] Routed to tool=%s", turn_id, tool_used)
 
                     # Parse ToolMessage JSON → user-facing assistant message
                     from langchain_core.messages import ToolMessage
                     if isinstance(last_msg, ToolMessage) and last_msg.content:
-                        status.update(label="Generating your response...")
+                        _status_phase = "generating"
+                        status.update(label="Crafting your personalized response...")
                         try:
                             parsed = json.loads(last_msg.content)
                             # Check if workflow entered profile collection — form will handle display
@@ -1270,8 +1773,6 @@ if prompt:
                             assistant_message = parsed.get("assistant_message")
                             if assistant_message and assistant_message != response_content:
                                 response_content = assistant_message
-                                if not _form_will_render:
-                                    response_placeholder.markdown(response_content)
                                 tool_direct_reply = True
                                 _ui_logger.debug(
                                     "[Turn %s] Tool assistant_message received (chars=%d)",
@@ -1298,15 +1799,15 @@ if prompt:
                         and not _form_will_render
                     ):
                         response_content = last_msg.content
-                        response_placeholder.markdown(response_content)
                         _ui_logger.debug(
                             "[Turn %s] Final AI direct reply received (chars=%d)",
                             turn_id,
                             len(response_content),
                         )
 
+            _status_stop.set()
             elapsed = perf_counter() - turn_start
-            status.update(label="Done", state="complete")
+            status.update(label="Here you go!", state="complete")
             _ui_logger.info(
                 "[Turn %s] Stream completed in %.2fs with %d events",
                 turn_id,
@@ -1314,6 +1815,7 @@ if prompt:
                 event_count,
             )
         except Exception as e:
+            _status_stop.set()
             elapsed = perf_counter() - turn_start
             _ui_logger.error("[Turn %s] Error: %s", turn_id, e)
             import openai
@@ -1324,6 +1826,10 @@ if prompt:
             else:
                 st.error(f"An error occurred: {e}")
             response_content = ""
+
+        # ── Stream the response with typewriter effect ──────────
+        if response_content and not _form_will_render:
+            _stream_response(response_content, response_placeholder)
 
         # ── Optional: base agent technique comparison ─────────────
         if show_base and tool_used:

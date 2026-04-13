@@ -1,76 +1,115 @@
 """
 agent/persistence.py
 ────────────────────
-SQLite persistence helpers for FITGEN.AI multi-turn workflows.
+Persistence facade for FITGEN.AI.
+
+This module provides the **same public API** as the old SQLite-based
+persistence layer, but delegates all storage to MongoDB via the
+repository classes in ``agent.db.repositories``.
+
+Consumers (state_manager.py, state_sync.py, streamlit_app.py, app.py)
+import from here and don't need to know about the underlying DB engine.
 """
 
 from __future__ import annotations
 
-import json
-import sqlite3
-from pathlib import Path
+import logging
 from typing import Any
 
-DB_PATH = Path(__file__).resolve().parents[1] / "fitgen.db"
+from agent.db.mongo import init_indexes
+from agent.db.repositories.session_repo import SessionRepository
+from agent.db.repositories.user_repo import UserRepository
+
+logger = logging.getLogger("fitgen.persistence")
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# ── Initialization ───────────────────────────────────────────────
 
 
 def init_db() -> None:
-    with _connect() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_records (
-                state_id TEXT PRIMARY KEY,
-                domain TEXT NOT NULL,
-                profile_json TEXT NOT NULL,
-                plan_text TEXT,
-                calendar_sync INTEGER DEFAULT 0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS context_states (
-                context_id TEXT PRIMARY KEY,
-                user_email TEXT,
-                user_profile_json TEXT NOT NULL,
-                workflow_json TEXT NOT NULL,
-                calendar_sync INTEGER DEFAULT 0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
+    """Initialize the database — creates MongoDB indexes.
 
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(context_states)").fetchall()
-        }
-        if "user_email" not in columns:
-            conn.execute("ALTER TABLE context_states ADD COLUMN user_email TEXT")
-        conn.commit()
+    Safe to call on every startup (idempotent).
+    """
+    init_indexes()
+    logger.info("Database initialized (MongoDB indexes ensured).")
+
+
+# ── Context / Session state ──────────────────────────────────────
+# These functions maintain backward compatibility with the old SQLite
+# API so that state_manager.py and state_sync.py work unchanged.
+
+
+def get_context_state(context_id: str) -> dict[str, Any] | None:
+    """Retrieve session state by context_id (session_id).
+
+    Returns a dict matching the old contract:
+    ``{context_id, state_id, user_email, user_profile, workflow,
+       calendar_sync_requested, updated_at}``
+    """
+    doc = SessionRepository.find_by_session_id(context_id)
+    if not doc:
+        return None
+    return _session_doc_to_context(doc)
+
+
+def get_latest_context_state_by_email(user_email: str) -> dict[str, Any] | None:
+    """Retrieve the most recent session for an email address."""
+    if not user_email:
+        return None
+    doc = SessionRepository.find_latest_by_email(user_email)
+    if not doc:
+        return None
+    return _session_doc_to_context(doc)
+
+
+def upsert_context_state(
+    *,
+    context_id: str,
+    user_email: str,
+    user_profile: dict[str, Any],
+    workflow: dict[str, Any],
+    calendar_sync_requested: bool,
+) -> None:
+    """Create or update a session document."""
+    SessionRepository.upsert(
+        session_id=context_id,
+        user_email=user_email,
+        user_profile=user_profile,
+        workflow=workflow,
+        calendar_sync_requested=calendar_sync_requested,
+    )
+
+
+def delete_context_state(context_id: str) -> bool:
+    """Delete a session by context_id.  Returns True if removed."""
+    return SessionRepository.delete(context_id)
+
+
+# ── User records (legacy facade) ────────────────────────────────
+# The old user_records table stored per-session plan snapshots.
+# We keep the function signatures for any callers but route them
+# to the new collections.  These are thin wrappers — the real work
+# happens in the plan repos + user repo.
 
 
 def get_record(state_id: str) -> dict[str, Any] | None:
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT state_id, domain, profile_json, plan_text, calendar_sync, updated_at FROM user_records WHERE state_id = ?",
-            (state_id,),
-        ).fetchone()
-    if not row:
+    """Legacy: fetch a user record by state_id.
+
+    Now looks up the session to find the associated plan.
+    """
+    session = SessionRepository.find_by_session_id(state_id)
+    if not session:
         return None
+
+    workflow = session.get("workflow") or {}
     return {
-        "state_id": row["state_id"],
-        "domain": row["domain"],
-        "profile": json.loads(row["profile_json"]),
-        "plan_text": row["plan_text"] or "",
-        "calendar_sync": bool(row["calendar_sync"]),
-        "updated_at": row["updated_at"],
+        "state_id": state_id,
+        "domain": workflow.get("domain", ""),
+        "profile": session.get("user_profile") or {},
+        "plan_text": workflow.get("plan_text", ""),
+        "calendar_sync": session.get("calendar_sync_requested", False),
+        "updated_at": session.get("updated_at"),
     }
 
 
@@ -82,124 +121,43 @@ def upsert_record(
     plan_text: str,
     calendar_sync: bool = False,
 ) -> None:
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO user_records (state_id, domain, profile_json, plan_text, calendar_sync, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(state_id) DO UPDATE SET
-                domain = excluded.domain,
-                profile_json = excluded.profile_json,
-                plan_text = excluded.plan_text,
-                calendar_sync = excluded.calendar_sync,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                state_id,
-                domain,
-                json.dumps(profile, ensure_ascii=False),
-                plan_text,
-                int(calendar_sync),
-            ),
-        )
-        conn.commit()
+    """Legacy: upsert a user record.
+
+    Routes to a session upsert with the plan text stored in workflow.
+    """
+    SessionRepository.upsert(
+        session_id=state_id,
+        user_profile=profile,
+        workflow={"domain": domain, "plan_text": plan_text},
+        calendar_sync_requested=calendar_sync,
+    )
 
 
 def update_calendar_sync(state_id: str, enabled: bool) -> None:
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE user_records SET calendar_sync = ?, updated_at = CURRENT_TIMESTAMP WHERE state_id = ?",
-            (int(enabled), state_id),
-        )
-        conn.commit()
+    """Legacy: toggle calendar sync flag on a record."""
+    SessionRepository.upsert(
+        session_id=state_id,
+        calendar_sync_requested=enabled,
+    )
 
 
 def delete_record(state_id: str) -> bool:
-    with _connect() as conn:
-        cur = conn.execute("DELETE FROM user_records WHERE state_id = ?", (state_id,))
-        conn.commit()
-        return cur.rowcount > 0
+    """Legacy: delete a user record by state_id."""
+    return SessionRepository.delete(state_id)
 
 
-def get_context_state(context_id: str) -> dict[str, Any] | None:
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT context_id, user_email, user_profile_json, workflow_json, calendar_sync, updated_at FROM context_states WHERE context_id = ?",
-            (context_id,),
-        ).fetchone()
-    if not row:
-        return None
+# ── Internal helpers ─────────────────────────────────────────────
+
+
+def _session_doc_to_context(doc: dict[str, Any]) -> dict[str, Any]:
+    """Convert a MongoDB session document to the old context_state dict shape."""
+    session_id = doc.get("session_id", "")
     return {
-        "context_id": row["context_id"],
-        "state_id": row["context_id"],
-        "user_email": row["user_email"] or "",
-        "user_profile": json.loads(row["user_profile_json"] or "{}"),
-        "workflow": json.loads(row["workflow_json"] or "{}"),
-        "calendar_sync_requested": bool(row["calendar_sync"]),
-        "updated_at": row["updated_at"],
+        "context_id": session_id,
+        "state_id": session_id,
+        "user_email": doc.get("user_email", ""),
+        "user_profile": doc.get("user_profile") or {},
+        "workflow": doc.get("workflow") or {},
+        "calendar_sync_requested": doc.get("calendar_sync_requested", False),
+        "updated_at": doc.get("updated_at"),
     }
-
-
-def get_latest_context_state_by_email(user_email: str) -> dict[str, Any] | None:
-    if not user_email:
-        return None
-    with _connect() as conn:
-        row = conn.execute(
-            """
-            SELECT context_id, user_email, user_profile_json, workflow_json, calendar_sync, updated_at
-            FROM context_states
-            WHERE user_email = ?
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (user_email,),
-        ).fetchone()
-    if not row:
-        return None
-    return {
-        "context_id": row["context_id"],
-        "state_id": row["context_id"],
-        "user_email": row["user_email"] or "",
-        "user_profile": json.loads(row["user_profile_json"] or "{}"),
-        "workflow": json.loads(row["workflow_json"] or "{}"),
-        "calendar_sync_requested": bool(row["calendar_sync"]),
-        "updated_at": row["updated_at"],
-    }
-
-
-def upsert_context_state(
-    *,
-    context_id: str,
-    user_email: str,
-    user_profile: dict[str, Any],
-    workflow: dict[str, Any],
-    calendar_sync_requested: bool,
-) -> None:
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO context_states (context_id, user_email, user_profile_json, workflow_json, calendar_sync, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(context_id) DO UPDATE SET
-                user_email = excluded.user_email,
-                user_profile_json = excluded.user_profile_json,
-                workflow_json = excluded.workflow_json,
-                calendar_sync = excluded.calendar_sync,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                context_id,
-                user_email,
-                json.dumps(user_profile, ensure_ascii=False),
-                json.dumps(workflow, ensure_ascii=False),
-                int(calendar_sync_requested),
-            ),
-        )
-        conn.commit()
-
-
-def delete_context_state(context_id: str) -> bool:
-    with _connect() as conn:
-        cur = conn.execute("DELETE FROM context_states WHERE context_id = ?", (context_id,))
-        conn.commit()
-        return cur.rowcount > 0
