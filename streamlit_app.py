@@ -696,11 +696,11 @@ PROFILE_FORM_FIELDS: dict[str, dict] = {
     "snack_preference": {"type": "selectbox", "label": "Snack Preference", "options": ["sweet", "savoury", "both"]},
     "late_night_snacking": {"type": "selectbox", "label": "Late Night Snacking?", "options": ["yes", "sometimes", "no"]},
     # ── Workout-specific ─────────────────────────────────────────
-    "activity_level":  {"type": "selectbox", "label": "Activity Level", "options": ["sedentary", "light", "moderate", "high", "athlete"]},
-    "fitness_level":   {"type": "selectbox", "label": "Fitness Level", "options": ["beginner", "intermediate", "advanced"]},
-    "equipment":       {"type": "text",      "label": "Equipment Available"},
-    "workout_days":    {"type": "number",    "label": "Workout Days Per Week", "min": 1, "max": 7, "step": 1, "default": 4},
-    "additional_info": {"type": "textarea",  "label": "Injuries, Physical Limitations, or Other Info (optional)"},
+    "experience_level":       {"type": "selectbox", "label": "Experience Level", "options": ["beginner", "intermediate", "advanced"]},
+    "training_days_per_week": {"type": "number",    "label": "Training Days Per Week", "min": 1, "max": 7, "step": 1, "default": 4},
+    "session_duration":       {"type": "number",    "label": "Session Duration (minutes)", "min": 15, "max": 180, "step": 5, "default": 45},
+    "daily_steps":            {"type": "number",    "label": "Daily Steps (approx.)", "min": 0, "max": 50000, "step": 500, "default": 5000},
+    "additional_info":        {"type": "textarea",  "label": "Injuries, Physical Limitations, or Other Info (optional)"},
 }
 
 

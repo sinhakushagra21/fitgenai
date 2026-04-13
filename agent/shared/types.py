@@ -90,15 +90,6 @@ DIET_PROFILE_FIELDS: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Domain-required fields (legacy mapping)
-# ---------------------------------------------------------------------------
-
-DOMAIN_REQUIRED_FIELDS: dict[str, list[str]] = {
-    "diet": DIET_PROFILE_FIELDS,
-    "workout": BASE_PROFILE_FIELDS + ["fitness_level", "equipment", "workout_days"],
-}
-
-# ---------------------------------------------------------------------------
 # Required / optional field separation — Diet
 # ---------------------------------------------------------------------------
 
@@ -125,14 +116,14 @@ DIET_ALL_FIELDS: list[str] = DIET_REQUIRED_FIELDS + DIET_OPTIONAL_FIELDS
 WORKOUT_REQUIRED_FIELDS: list[str] = [
     "name",
     "age",
-    "sex",
-    "height_cm",
-    "weight_kg",
     "goal",
-    "activity_level",
-    "fitness_level",
-    "equipment",
-    "workout_days",
+    "experience_level",
+    "training_days_per_week",
+    "session_duration",
+    "job_type",
+    "daily_steps",
+    "sleep_hours",
+    "stress_level",
 ]
 
 WORKOUT_OPTIONAL_FIELDS: list[str] = [
@@ -142,20 +133,41 @@ WORKOUT_OPTIONAL_FIELDS: list[str] = [
 WORKOUT_ALL_FIELDS: list[str] = WORKOUT_REQUIRED_FIELDS + WORKOUT_OPTIONAL_FIELDS
 
 # ---------------------------------------------------------------------------
+# Domain-required fields (legacy mapping)
+# ---------------------------------------------------------------------------
+
+DOMAIN_REQUIRED_FIELDS: dict[str, list[str]] = {
+    "diet": DIET_PROFILE_FIELDS,
+    "workout": WORKOUT_ALL_FIELDS,
+}
+
+# ---------------------------------------------------------------------------
 # Field → question text (human-readable prompts for intake)
 # ---------------------------------------------------------------------------
 
 FIELD_QUESTION: dict[str, str] = {
+    # ── Shared / base fields ────────────────────────────────────────
     "name": "What name should I use for your plan?",
     "age": "What is your age?",
     "sex": "What is your sex (male/female/other)?",
     "height_cm": "What is your height in cm?",
     "weight_kg": "What is your current weight in kg?",
     "goal": "What is your primary goal (fat loss, muscle gain, maintenance, performance)?",
+    # ── Diet-specific ───────────────────────────────────────────────
     "activity_level": "What is your activity level (sedentary, light, moderate, high, athlete)?",
     "diet_preference": "What diet preference do you follow (omnivore, vegetarian, vegan, eggetarian, etc.)?",
     "foods_to_avoid": "Any foods you want to avoid?",
     "allergies": "Any allergies or intolerances?",
+    # ── Workout-specific ────────────────────────────────────────────
+    "experience_level": "What is your experience level (beginner, intermediate, advanced)?",
+    "training_days_per_week": "How many training days per week can you commit to?",
+    "session_duration": "How long can each workout session be (in minutes)?",
+    "daily_steps": "Roughly how many steps do you walk daily?",
+    # ── Shared lifestyle (used by both diet & workout) ──────────────
+    "job_type": "What type of job do you have (desk job, on your feet, manual labour, WFH)?",
+    "sleep_hours": "How many hours of sleep do you get per night?",
+    "stress_level": "What is your stress level (low, moderate, high)?",
+    # ── Legacy (kept for backwards compatibility) ───────────────────
     "fitness_level": "What is your current fitness level (beginner, intermediate, advanced)?",
     "equipment": "What equipment do you have access to?",
     "workout_days": "How many workout days per week can you commit to?",
@@ -204,6 +216,9 @@ PROFILE_VALIDATION: dict[str, dict[str, int | float | type]] = {
     "height_cm": {"min": 50.0, "max": 250.0, "type": float},
     "weight_kg": {"min": 20.0, "max": 300.0, "type": float},
     "workout_days": {"min": 1, "max": 7, "type": int},
+    "training_days_per_week": {"min": 1, "max": 7, "type": int},
+    "session_duration": {"min": 15, "max": 180, "type": int},
+    "daily_steps": {"min": 0, "max": 50000, "type": int},
     "food_adventurousness": {"min": 1, "max": 10, "type": int},
     "sleep_hours": {"min": 3, "max": 12, "type": int},
 }

@@ -44,7 +44,7 @@ class TestMissingProfileFields:
         missing = missing_profile_fields(profile, fields)
         assert "name" not in missing
         assert "age" not in missing
-        assert "sex" in missing
+        assert "experience_level" in missing
 
     def test_none_value_counts_as_missing(self):
         profile = {"name": None, "age": 25}
@@ -160,9 +160,10 @@ class TestFormattingHelpers:
 class TestRequiredFields:
     def test_workout_fields(self):
         fields = required_fields_for_domain("workout")
-        assert "fitness_level" in fields
-        assert "equipment" in fields
-        assert "workout_days" in fields
+        assert "experience_level" in fields
+        assert "training_days_per_week" in fields
+        assert "session_duration" in fields
+        assert "daily_steps" in fields
 
     def test_diet_fields(self):
         fields = required_fields_for_domain("diet")

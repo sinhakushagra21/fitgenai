@@ -295,7 +295,8 @@ diet_preference, foods_to_avoid, allergies, fitness_level, equipment,
 workout_days, goal_weight, weight_loss_pace, job_type, exercise_frequency,
 exercise_type, sleep_hours, stress_level, alcohol_intake, favourite_meals,
 cooking_style, food_adventurousness, current_snacks, snack_reason,
-snack_preference, late_night_snacking.
+snack_preference, late_night_snacking, experience_level,
+training_days_per_week, session_duration, daily_steps.
 
 CRITICAL RULES:
 - If the message is a command or request (e.g. "create a diet plan",
@@ -361,6 +362,8 @@ def extract_profile_updates_with_fallback(
     direct_parse_fields = {
         "name", "age", "sex", "height_cm", "weight_kg", "goal",
         "activity_level", "fitness_level", "workout_days",
+        "experience_level", "training_days_per_week", "session_duration",
+        "daily_steps", "stress_level", "job_type",
     }
     for field in normalized_expected:
         if field in updates:

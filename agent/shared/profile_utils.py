@@ -116,19 +116,59 @@ def _parse_single_field(field: str, query: str) -> Any | None:
                 return norm
         return None
 
-    if field == "fitness_level":
+    if field in ("fitness_level", "experience_level"):
         levels = {"beginner", "intermediate", "advanced"}
         for level in levels:
             if level in lower:
                 return level
         return None
 
-    if field == "workout_days":
+    if field in ("workout_days", "training_days_per_week"):
         value = _extract_number(text)
         if value is None:
             return None
         days = int(round(value))
         return days if 1 <= days <= 7 else None
+
+    if field == "session_duration":
+        value = _extract_number(text)
+        if value is None:
+            return None
+        minutes = int(round(value))
+        return minutes if 15 <= minutes <= 180 else None
+
+    if field == "daily_steps":
+        value = _extract_number(text)
+        if value is None:
+            return None
+        steps = int(round(value))
+        return steps if 0 <= steps <= 50000 else None
+
+    if field == "stress_level":
+        for level in ("low", "moderate", "high"):
+            if level in lower:
+                return level
+        return None
+
+    if field == "job_type":
+        _job_keywords = {
+            "desk": "desk job",
+            "office": "desk job",
+            "wfh": "work from home",
+            "work from home": "work from home",
+            "remote": "work from home",
+            "retail": "on my feet (retail/teaching)",
+            "teaching": "on my feet (retail/teaching)",
+            "on my feet": "on my feet (retail/teaching)",
+            "manual": "manual labour",
+            "labour": "manual labour",
+            "labor": "manual labour",
+            "construction": "manual labour",
+        }
+        for key, norm in _job_keywords.items():
+            if key in lower:
+                return norm
+        return None
 
     if field in {"diet_preference", "foods_to_avoid", "allergies", "equipment"}:
         cleaned = re.sub(r"\s+", " ", text).strip(" .,!?")

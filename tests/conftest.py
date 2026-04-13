@@ -47,12 +47,17 @@ def sample_user_profile() -> dict:
         "snack_reason": "boredom",
         "snack_preference": "both",
         "late_night_snacking": "sometimes",
-        # Workout-specific
+        # Workout-specific (new fields)
+        "experience_level": "intermediate",
+        "training_days_per_week": 5,
+        "session_duration": 60,
+        "daily_steps": 7000,
+        "additional_info": "none",
+        # Legacy workout fields (kept for backwards compat)
         "activity_level": "moderate",
         "fitness_level": "intermediate",
         "equipment": "full gym",
         "workout_days": 5,
-        "additional_info": "none",
     }
 
 
