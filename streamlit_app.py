@@ -497,24 +497,81 @@ hr {
     50% { opacity: 0; }
 }
 
-/* ── Profile avatar ────────────────────────────────── */
-.profile-avatar {
-    width: 38px; height: 38px; border-radius: 50%;
-    background: linear-gradient(135deg, #ff6b2b, #e63946);
-    display: flex; align-items: center; justify-content: center;
-    color: white; font-weight: 800; font-size: 1.05rem;
-    flex-shrink: 0;
+/* ── Profile card ──────────────────────────────────── */
+.profile-card {
+    background: linear-gradient(145deg, rgba(255,107,43,0.06), rgba(230,57,70,0.04));
+    border: 1px solid rgba(255,107,43,0.15);
+    border-radius: 14px;
+    padding: 0.85rem 0.8rem;
+    margin-bottom: 0.25rem;
 }
 .profile-row {
-    display: flex; align-items: center; gap: 0.65rem;
-    padding: 0.3rem 0;
+    display: flex; align-items: center; gap: 0.7rem;
+}
+.profile-avatar-ring {
+    position: relative;
+    width: 44px; height: 44px;
+    flex-shrink: 0;
+}
+.profile-avatar-ring::before {
+    content: '';
+    position: absolute;
+    inset: -2.5px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ff6b2b, #e63946, #ff6b2b);
+    background-size: 200% 200%;
+    animation: avatarRingShift 4s ease infinite;
+    z-index: 0;
+}
+@keyframes avatarRingShift {
+    0%, 100% { background-position: 0% 50%; }
+    50%      { background-position: 100% 50%; }
+}
+.profile-avatar {
+    position: relative;
+    z-index: 1;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: linear-gradient(135deg, #ff6b2b 0%, #e63946 100%);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 800; font-size: 1.15rem;
+    letter-spacing: 0.02em;
+    box-shadow: 0 2px 10px rgba(255,107,43,0.25);
+}
+.profile-status-dot {
+    position: absolute;
+    bottom: 1px; right: 1px;
+    width: 10px; height: 10px;
+    background: #22c55e;
+    border: 2px solid #0e1117;
+    border-radius: 50%;
+    z-index: 2;
+}
+.profile-info {
+    min-width: 0;
+    flex: 1;
 }
 .profile-name {
-    color: var(--text-primary); font-size: 0.88rem; font-weight: 600;
-    line-height: 1.2;
+    color: var(--text-primary); font-size: 0.88rem; font-weight: 700;
+    line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .profile-email {
-    color: var(--text-muted); font-size: 0.7rem; line-height: 1.2;
+    color: var(--text-muted); font-size: 0.68rem; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-top: 1px;
+}
+.profile-badge {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 1px 7px;
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #ff6b2b;
+    background: rgba(255,107,43,0.1);
+    border: 1px solid rgba(255,107,43,0.2);
+    border-radius: 6px;
 }
 
 /* ── Workout card ──────────────────────────────────── */
@@ -1760,12 +1817,20 @@ with st.sidebar:
         _display = _sidebar_name or _sidebar_email.split("@")[0]
         _initial = _display[0].upper() if _display else "U"
 
-        # Avatar + name row
+        # Avatar + name card
         st.markdown(
+            f'<div class="profile-card">'
             f'<div class="profile-row">'
+            f'<div class="profile-avatar-ring">'
             f'<div class="profile-avatar">{_initial}</div>'
-            f'<div><div class="profile-name">{_display}</div>'
-            f'<div class="profile-email">{_sidebar_email}</div></div>'
+            f'<div class="profile-status-dot"></div>'
+            f'</div>'
+            f'<div class="profile-info">'
+            f'<div class="profile-name">{_display}</div>'
+            f'<div class="profile-email">{_sidebar_email}</div>'
+            f'<div class="profile-badge">✦ Member</div>'
+            f'</div>'
+            f'</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
