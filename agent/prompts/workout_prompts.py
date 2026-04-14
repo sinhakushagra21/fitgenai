@@ -256,7 +256,23 @@ week. Training days: Z. Deload: [strategy]. ✓"
 Output exactly ONE training programme. Do NOT output multiple versions, \
 drafts, "Option A / Option B" variants, or "adjusted" programmes. \
 Verify all decisions internally FIRST, then present the single final \
-programme. After the disclaimer, STOP.
+programme.
+
+## Structured Data Block (MANDATORY — append after disclaimer)
+After the disclaimer, you MUST append a hidden HTML comment block \
+containing a JSON summary of the weekly training schedule. This is \
+used by the app's dashboard — the user never sees it.
+
+Format (copy exactly, fill in from YOUR schedule):
+<!-- FITGEN_DATA
+{"schedule": [{"day": "Mon", "session": "<session name>", "exercises": [{"name": "<exercise>", "sets_reps": "<sets x reps>"}, ...]}, ...]}
+-->
+
+Rules:
+- Include EVERY training day from your Training Schedule table.
+- Use 3-letter day abbreviations: Mon, Tue, Wed, Thu, Fri, Sat, Sun.
+- Only include actual exercises — skip warm-up and cool-down rows.
+- This block MUST be the very last thing in your response.
 
 ---
 
@@ -306,6 +322,8 @@ _WORKOUT_FOOTER = """
    versions. Stop after the disclaimer.
 8. Never fabricate exercises, studies, or biomechanical claims.
 9. Show the volume verification line before the disclaimer.
+10. ALWAYS end with the <!-- FITGEN_DATA ... --> JSON block AFTER the \
+    disclaimer. This is mandatory for every plan response.
 """
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

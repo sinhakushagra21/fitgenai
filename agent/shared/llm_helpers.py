@@ -38,6 +38,7 @@ __all__ = [
     "extract_profile_updates",
     "extract_profile_updates_with_fallback",
     "answer_followup_question",
+    "answer_plan_question",
     "generate_plan",
     "generate_plan_as_json",
     "validate_plan_json",
@@ -194,7 +195,9 @@ Step 4: "{domain}_plan_generated" — A plan has been generated and shown.
   The system asked "Reply yes to confirm, or tell me what to change."
   → "yes" / "confirm" / "looks good" → "confirm_{domain}" ✓ (NOW it's correct!)
   → "change X" / "make it Y" / update requests → "update_{domain}"
-  → Questions about the plan → "general_{domain}_query"
+  → Questions about the plan content ("what should I eat tomorrow",
+    "show Monday's workout", "whats my routine") → "get_{domain}"
+  → Generic knowledge questions ("is creatine safe") → "general_{domain}_query"
 
 Step 5: "updated_{domain}_plan" — The plan was regenerated after changes.
   → Same as Step 4. "yes" → "confirm_{domain}". Changes → "update_{domain}".
@@ -203,6 +206,8 @@ Step 6: "{domain}_confirmed" — Plan is confirmed. Workflow is essentially done
   → Sync requests → "sync_{domain}_to_google_calendar" / "sync_{domain}_to_google_fit"
   → "done" / decline sync → "general_{domain}_query"
   → "create a new plan" → "create_{domain}" (start over)
+  → Questions about the plan ("what should I eat tomorrow", "show my
+    plan", "whats my Monday workout") → "get_{domain}"
 
 ═══════════════════════════════════════════════════════════
 CRITICAL RULES (override everything else)
@@ -220,9 +225,14 @@ RULE 2 — Profile data is always "create_{domain}" during create flow:
   diet_preference, exercise_frequency, etc.) when step is "prompted_for_user_profile_data"
   or "user_profile_mapped" → "create_{domain}".
 
-RULE 3 — Questions are "general_{domain}_query":
-  Messages with ?, "which", "what", "when", "how", "can I", "should I",
-  "kya", "konsa", "kaise", "kab" → "general_{domain}_query" (in any language).
+RULE 3 — Distinguish "get_{domain}" from "general_{domain}_query":
+  If the user is asking about THEIR OWN existing plan — e.g. "what should
+  I eat tomorrow", "what's my workout today", "show my Monday meals",
+  "get my diet plan for tomorrow", "whats my routine" — that is "get_{domain}"
+  (retrieving info from the stored plan).
+  Only use "general_{domain}_query" for generic knowledge questions NOT about
+  the user's plan — e.g. "how much protein do I need", "is creatine safe",
+  "what exercises target glutes".
 
 RULE 4 — Sync requests require a confirmed plan:
   "sync to calendar" / "sync to google fit" → only valid AFTER plan is confirmed.
@@ -239,10 +249,12 @@ GENERAL CLASSIFICATION (when no critical rule applies)
 • Wants a new plan → "create_{domain}"
 • Wants to modify/change/update plan → "update_{domain}"
 • Wants to delete plan → "delete_{domain}"
-• Wants to see/retrieve plan → "get_{domain}"
+• Wants to see/retrieve plan OR asks about their own plan (e.g. "what should
+  I eat tomorrow", "what's my workout today", "show me Monday's meals",
+  "get my diet", "whats my routine") → "get_{domain}"
 • Sync to Google Calendar → "sync_{domain}_to_google_calendar"
 • Sync to Google Fit → "sync_{domain}_to_google_fit"
-• Question, small talk, or unclear → "general_{domain}_query"
+• General knowledge question NOT about user's plan, small talk → "general_{domain}_query"
 """
 
     data = _llm_json(system, query)
@@ -416,6 +428,68 @@ def answer_followup_question(
     resp = llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=prompt),
+    ])
+    return resp.content
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Plan Q&A — answer specific questions from an existing plan
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_PLAN_QA_SYSTEM = """\
+You are a helpful fitness and nutrition assistant. The user has an \
+existing {domain} plan (shown below). Respond to their request using ONLY \
+information from this plan.
+
+Today is {today} ({today_weekday}). Tomorrow is {tomorrow} ({tomorrow_weekday}).
+
+Rules:
+- If the user asks about a SPECIFIC day, meal, exercise, or topic — extract \
+  ONLY that portion and present it clearly. Do NOT reproduce the entire plan.
+- If the user asks for a specific day like "tomorrow" or "Monday", map it to \
+  the correct day of the week using the dates above, then return ONLY that day.
+- Use markdown tables when the answer involves meals, exercises, or schedules.
+- If the user is asking to see their full/entire/complete plan (e.g. "show my \
+  plan", "get my diet plan", "display my workout"), return the FULL plan as-is.
+- Be concise and directly helpful.
+- If the plan doesn't contain the answer, say so honestly.
+"""
+
+
+def answer_plan_question(
+    domain: str,
+    plan_text: str,
+    question: str,
+) -> str:
+    """Use FAST_MODEL to intelligently answer any query about a stored plan.
+
+    The LLM decides whether to return the full plan or just the relevant
+    section based on the user's question — no keyword matching needed.
+    """
+    from datetime import datetime, timedelta
+
+    today = datetime.now()
+    tomorrow = today + timedelta(days=1)
+
+    system = _PLAN_QA_SYSTEM.format(
+        domain=domain,
+        today=today.strftime("%A, %B %d"),
+        today_weekday=today.strftime("%A"),
+        tomorrow=tomorrow.strftime("%A, %B %d"),
+        tomorrow_weekday=tomorrow.strftime("%A"),
+    )
+
+    user_msg = (
+        f"## User's {domain} plan:\n\n"
+        f"{plan_text}\n\n"
+        f"---\n\n"
+        f"## User's question:\n{question}"
+    )
+
+    llm = ChatOpenAI(model=_FAST_MODEL, temperature=0.3, max_tokens=4096)
+    resp = llm.invoke([
+        SystemMessage(content=system),
+        HumanMessage(content=user_msg),
     ])
     return resp.content
 

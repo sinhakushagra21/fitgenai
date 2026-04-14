@@ -189,11 +189,12 @@ def _build_workflow_context(state: AgentState) -> str:
             )
         elif step_completed in ("diet_confirmed", "workout_confirmed"):
             lines.append(
-                f"  Hint: The {domain} plan was just confirmed and the user was "
-                f"offered Google Calendar / Google Fit sync. If the user wants "
-                f"to sync, says 'yes', 'calendar', 'fit', 'both', or 'done', "
-                f"route to {tool_name}. If the user wants a plan for the OTHER "
-                f"domain, route to that tool instead."
+                f"  Hint: The {domain} plan is confirmed. Routing rules:\n"
+                f"  • Sync requests ('yes', 'calendar', 'fit', 'both', 'done') → {tool_name}\n"
+                f"  • Questions about THIS plan ('what should I eat tomorrow', "
+                f"'show my plan', 'whats my Monday workout') → {tool_name}\n"
+                f"  • Wants a plan for the OTHER domain → route to that domain's tool\n"
+                f"  • Generic knowledge questions → {tool_name}"
             )
     else:
         # Workflow exists but is in a terminal state (completed).

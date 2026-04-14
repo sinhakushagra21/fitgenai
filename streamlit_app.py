@@ -41,6 +41,8 @@ from agent.prompts.base_prompts import BASE_PROMPTS
 from agent.prompts.techniques import TECHNIQUE_KEYS, TECHNIQUE_META
 from agent.shared.types import DOMAIN_REQUIRED_FIELDS
 from agent.db.repositories.user_repo import UserRepository
+from agent.db.repositories.diet_plan_repo import DietPlanRepository
+from agent.db.repositories.workout_plan_repo import WorkoutPlanRepository
 
 
 # ── Log capture ───────────────────────────────────────────────────
@@ -494,6 +496,129 @@ hr {
 @keyframes blink {
     50% { opacity: 0; }
 }
+
+/* ── Profile avatar ────────────────────────────────── */
+.profile-avatar {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: linear-gradient(135deg, #ff6b2b, #e63946);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 800; font-size: 1.05rem;
+    flex-shrink: 0;
+}
+.profile-row {
+    display: flex; align-items: center; gap: 0.65rem;
+    padding: 0.3rem 0;
+}
+.profile-name {
+    color: var(--text-primary); font-size: 0.88rem; font-weight: 600;
+    line-height: 1.2;
+}
+.profile-email {
+    color: var(--text-muted); font-size: 0.7rem; line-height: 1.2;
+}
+
+/* ── Workout card ──────────────────────────────────── */
+.workout-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.4rem;
+}
+.workout-card-session {
+    color: var(--accent-orange);
+    font-size: 1rem; font-weight: 700;
+}
+.workout-card-day {
+    color: var(--text-muted);
+    font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: 600;
+}
+.workout-exercise {
+    color: var(--text-secondary);
+    font-size: 0.8rem; padding: 0.15rem 0;
+    display: flex; justify-content: space-between;
+}
+.workout-exercise-sets {
+    color: var(--text-muted); font-size: 0.75rem;
+}
+
+/* ── Water tracker ─────────────────────────────────── */
+.water-progress-bar {
+    background: #1a1a1a;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    height: 18px;
+    overflow: hidden;
+    margin: 0.4rem 0;
+}
+.water-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #1a73e8, #34a0f5);
+    border-radius: 8px;
+    transition: width 0.3s ease;
+}
+.water-label {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    display: flex; justify-content: space-between;
+    align-items: center;
+}
+
+/* ── Daily tip ─────────────────────────────────────── */
+.tip-card {
+    background: linear-gradient(135deg, rgba(255,107,43,0.08), rgba(230,57,70,0.05));
+    border: 1px solid rgba(255,107,43,0.15);
+    border-radius: 12px;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.4rem;
+}
+.tip-text {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    font-style: italic;
+}
+.tip-label {
+    color: var(--accent-orange);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+}
+
+/* ── Sidebar button & text spacing ────────────────── */
+[data-testid="stSidebar"] .stButton {
+    margin-bottom: 0.15rem !important;
+    margin-top: 0.15rem !important;
+}
+[data-testid="stSidebar"] .stButton > button {
+    padding: 0.35rem 0.75rem !important;
+    font-size: 0.82rem !important;
+    min-height: 2rem !important;
+}
+[data-testid="stSidebar"] .stPopover > div > button {
+    padding: 0.35rem 0.75rem !important;
+    font-size: 0.82rem !important;
+    min-height: 2rem !important;
+}
+[data-testid="stSidebar"] h2 {
+    font-size: 0.95rem !important;
+    margin-top: 0.6rem !important;
+    margin-bottom: 0.3rem !important;
+}
+[data-testid="stSidebar"] .stDivider {
+    margin-top: 0.4rem !important;
+    margin-bottom: 0.4rem !important;
+}
+[data-testid="stSidebar"] .stMarkdown {
+    margin-bottom: 0 !important;
+}
+[data-testid="stSidebar"] [data-testid="stPopover"] {
+    margin-top: 0.3rem !important;
+    margin-bottom: 0.2rem !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -946,6 +1071,66 @@ if "chat_history" not in st.session_state:
 if "profile_form_pending" not in st.session_state:
     st.session_state.profile_form_pending = False
 
+if "water_glasses" not in st.session_state:
+    st.session_state.water_glasses = 0
+
+# ── Sidebar data helpers (cached) ────────────────────────────────────
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_confirmed_diet_plan(user_id: str) -> dict | None:
+    """Fetch the latest confirmed diet plan (cached 30 s)."""
+    if not user_id:
+        return None
+    return DietPlanRepository.find_latest_by_user(user_id, status="confirmed")
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_confirmed_workout_plan(user_id: str) -> dict | None:
+    """Fetch the latest confirmed workout plan (cached 30 s)."""
+    if not user_id:
+        return None
+    return WorkoutPlanRepository.find_latest_by_user(user_id, status="confirmed")
+
+
+def _resolve_user_id() -> str:
+    """Get user_id from agent_state, or look it up from email if missing.
+
+    When a plan is confirmed mid-session, the tool creates the user in
+    MongoDB but agent_state['user_id'] may still be empty. This resolves
+    that by checking the DB.
+    """
+    uid = st.session_state.agent_state.get("user_id", "")
+    if uid:
+        return uid
+    email = st.session_state.agent_state.get("user_email", "")
+    if not email:
+        return ""
+    existing = UserRepository.find_by_email(email)
+    if existing:
+        uid = str(existing["_id"])
+        st.session_state.agent_state["user_id"] = uid  # persist for rest of session
+    return uid
+
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def _generate_daily_tip(goal: str, date_str: str) -> str:
+    """Generate a personalized daily fitness tip using the fast model.
+
+    Cached for 12 hours per (goal, date) combo.
+    """
+    try:
+        _tip_llm = ChatOpenAI(model=FAST_MODEL, temperature=0.8, max_tokens=60)
+        resp = _tip_llm.invoke(
+            f"You are a concise fitness coach. Give ONE short, specific, "
+            f"actionable tip (under 20 words) for someone whose goal is: "
+            f"{goal or 'general fitness'}. Today is {date_str}. "
+            f"Don't start with 'Tip:'. Be motivational but practical."
+        )
+        return resp.content.strip().strip('"').strip("'")
+    except Exception:
+        return ""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 TOOL_LABELS: dict[str, tuple[str, str, str]] = {
@@ -1334,25 +1519,52 @@ with st.sidebar:
     )
     st.divider()
 
-    # ── User info ─────────────────────────────────────────────
+    # ── Profile dropdown ─────────────────────────────────────
     _sidebar_name = st.session_state.get("auth_user_name", "")
     _sidebar_email = st.session_state.get("auth_user_email", "")
     if _sidebar_email:
         _display = _sidebar_name or _sidebar_email.split("@")[0]
+        _initial = _display[0].upper() if _display else "U"
+
+        # Avatar + name row
         st.markdown(
-            f'<div class="stat-card">'
-            f'<div class="stat-card-label">Signed in as</div>'
-            f'<div style="color:var(--text-primary);font-size:0.9rem;font-weight:600;">{_display}</div>'
-            f'<div style="color:var(--text-muted);font-size:0.75rem;">{_sidebar_email}</div>'
+            f'<div class="profile-row">'
+            f'<div class="profile-avatar">{_initial}</div>'
+            f'<div><div class="profile-name">{_display}</div>'
+            f'<div class="profile-email">{_sidebar_email}</div></div>'
             f'</div>',
             unsafe_allow_html=True,
         )
-        if st.button("Logout", use_container_width=True, key="logout_btn"):
-            for _k in ("authenticated", "auth_user_email", "auth_user_name",
-                        "auth_user_picture", "agent_state", "chat_history",
-                        "profile_form_pending", "graph"):
-                st.session_state.pop(_k, None)
-            st.rerun()
+
+        # Check if user already has confirmed plans in DB
+        _pop_user_id = _resolve_user_id()
+        _pop_has_diet = bool(_get_confirmed_diet_plan(_pop_user_id)) if _pop_user_id else False
+        _pop_has_workout = bool(_get_confirmed_workout_plan(_pop_user_id)) if _pop_user_id else False
+
+        with st.popover("Menu", use_container_width=True):
+            st.caption(f"Signed in as **{_display}**")
+
+            # Diet button — "Get" if plan exists, "Create" if not
+            _diet_label = "🥗 Get Diet Plan" if _pop_has_diet else "🥗 Create Diet Plan"
+            _diet_prompt = "Get my diet plan" if _pop_has_diet else "Create a diet plan"
+            if st.button(_diet_label, key="pop_diet", use_container_width=True):
+                st.session_state._quick_prompt = _diet_prompt
+                st.rerun()
+
+            # Workout button — "Get" if plan exists, "Create" if not
+            _wk_label = "💪 Get Workout Plan" if _pop_has_workout else "💪 Create Workout Plan"
+            _wk_prompt = "Get my workout plan" if _pop_has_workout else "Create a workout plan"
+            if st.button(_wk_label, key="pop_workout", use_container_width=True):
+                st.session_state._quick_prompt = _wk_prompt
+                st.rerun()
+
+            st.divider()
+            if st.button("🚪 Logout", key="pop_logout", use_container_width=True):
+                for _k in ("authenticated", "auth_user_email", "auth_user_name",
+                            "auth_user_picture", "agent_state", "chat_history",
+                            "profile_form_pending", "graph", "water_glasses"):
+                    st.session_state.pop(_k, None)
+                st.rerun()
         st.divider()
 
     # ── Workflow Progress ──────────────────────────────────────
@@ -1434,12 +1646,179 @@ with st.sidebar:
 
     st.divider()
 
-    # ── Controls ─────────────────────────────────────────────────
-    show_base = st.checkbox(
-        "Compare prompting techniques",
-        value=False,
-        help="Run all prompting techniques side-by-side on the base agent.",
+    # ── Macro Pie Chart ─────────────────────────────────────────
+    _sb_user_id = _resolve_user_id()
+    _sb_diet = _get_confirmed_diet_plan(_sb_user_id) if _sb_user_id else None
+
+    if _sb_diet:
+        try:
+            from agent.diet_visuals import extract_macros_from_plan, create_macro_donut_chart
+
+            # Prefer structured_data from DB; fall back to regex parsing
+            _sd = _sb_diet.get("structured_data", {})
+            _sd_macros = _sd.get("macros", {})
+
+            if _sd_macros:
+                _sb_p = _sd_macros.get("protein_g", 0)
+                _sb_c = _sd_macros.get("carbs_g", 0)
+                _sb_f = _sd_macros.get("fat_g", 0)
+                _sb_kcal = _sd_macros.get("calories", 0)
+            else:
+                # Fallback: regex parse from markdown
+                _fb = extract_macros_from_plan(_sb_diet.get("plan_markdown", ""))
+                _sb_p = _fb.get("protein_g", 0)
+                _sb_c = _fb.get("carbs_g", 0)
+                _sb_f = _fb.get("fat_g", 0)
+                _sb_kcal = _fb.get("total_kcal", 0)
+
+            if _sb_p > 0 and _sb_c > 0 and _sb_f > 0:
+                st.markdown("## 🥧 Macros")
+                _fig = create_macro_donut_chart(_sb_p, _sb_c, _sb_f, _sb_kcal, compact=True)
+                st.pyplot(_fig, use_container_width=True)
+                plt.close(_fig)
+                st.divider()
+        except Exception:
+            pass  # silently skip if parsing fails
+
+    # ── Today's Workout ─────────────────────────────────────────
+    _sb_workout = _get_confirmed_workout_plan(_sb_user_id) if _sb_user_id else None
+
+    if _sb_workout:
+        try:
+            from datetime import datetime as _dt_cls
+            _today_abbr = _dt_cls.now().strftime("%a")
+            _DAY_NAMES = {
+                "Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday",
+                "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday",
+                "Sun": "Sunday",
+            }
+
+            # Prefer structured_data from DB; fall back to regex parsing
+            _sd_w = _sb_workout.get("structured_data", {})
+            _schedule = _sd_w.get("schedule", [])
+
+            _todays = None
+            if _schedule:
+                for _entry in _schedule:
+                    if _entry.get("day") == _today_abbr:
+                        _todays = {
+                            "day_name": _DAY_NAMES.get(_today_abbr, _today_abbr),
+                            "session_name": _entry.get("session", "Workout"),
+                            "exercises": _entry.get("exercises", []),
+                        }
+                        break
+            else:
+                # Fallback: regex parse from markdown
+                from agent.workout_visuals import extract_todays_workout
+                _todays = extract_todays_workout(_sb_workout.get("plan_markdown", ""))
+
+            st.markdown("## 🏋️ Today")
+
+            if _todays:
+                st.markdown(
+                    f'<div class="workout-card">'
+                    f'<div class="workout-card-day">{_todays["day_name"]}</div>'
+                    f'<div class="workout-card-session">{_todays["session_name"]}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                for _ex in _todays["exercises"][:6]:
+                    _ex_name = _ex.get("name", "")
+                    _ex_sets = _ex.get("sets_reps", "")
+                    st.markdown(
+                        f'<div class="workout-exercise">'
+                        f'<span>{_ex_name}</span>'
+                        f'<span class="workout-exercise-sets">{_ex_sets}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                if len(_todays["exercises"]) > 6:
+                    st.caption(f"+{len(_todays['exercises']) - 6} more exercises")
+            else:
+                st.markdown(
+                    '<div class="workout-card">'
+                    '<div class="workout-card-day">Rest Day</div>'
+                    '<div class="workout-card-session">Recover & Stretch</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption("Light walking or yoga for active recovery.")
+            st.divider()
+        except Exception:
+            pass
+
+    # ── AI Daily Tip ────────────────────────────────────────────
+    _sb_profile = st.session_state.agent_state.get("user_profile", {})
+    _sb_goal = _sb_profile.get("goal", "")
+    if _sb_goal:
+        from datetime import date as _date_cls
+        _tip_text = _generate_daily_tip(_sb_goal, _date_cls.today().isoformat())
+        if _tip_text:
+            st.markdown(
+                f'<div class="tip-card">'
+                f'<div class="tip-label">💡 Daily Tip</div>'
+                f'<div class="tip-text">{_tip_text}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            st.divider()
+
+    # ── Water Intake Tracker ────────────────────────────────────
+    _water_target_liters = 3.0  # sensible default
+    if _sb_diet:
+        try:
+            # Prefer structured_data; fall back to regex
+            _sd_h = _sb_diet.get("structured_data", {}).get("hydration", {})
+            if _sd_h:
+                _water_target_liters = _sd_h.get("rest_day_liters", 3.0)
+            elif _sb_diet.get("plan_markdown"):
+                from agent.diet_visuals import extract_hydration_target
+                _hydration = extract_hydration_target(_sb_diet["plan_markdown"])
+                _water_target_liters = _hydration.get("rest_day_liters", 3.0)
+        except Exception:
+            pass
+
+    _total_glasses = max(int(_water_target_liters / 0.25), 8)
+    _current_glasses = st.session_state.get("water_glasses", 0)
+    _current_ml = _current_glasses * 250
+    _target_ml = _total_glasses * 250
+    _pct = min((_current_glasses / _total_glasses) * 100, 100) if _total_glasses > 0 else 0
+
+    st.markdown("## 💧 Water")
+    st.markdown(
+        f'<div class="water-label">'
+        f'<span>{_current_ml} ml</span>'
+        f'<span>{_target_ml} ml</span>'
+        f'</div>'
+        f'<div class="water-progress-bar">'
+        f'<div class="water-progress-fill" style="width:{_pct:.0f}%"></div>'
+        f'</div>',
+        unsafe_allow_html=True,
     )
+    st.caption(f"{_current_glasses} / {_total_glasses} glasses (250 ml each)")
+
+    _wcols = st.columns(3)
+    with _wcols[0]:
+        if st.button("➖", key="water_minus", use_container_width=True):
+            if st.session_state.water_glasses > 0:
+                st.session_state.water_glasses -= 1
+                st.rerun()
+    with _wcols[1]:
+        if st.button("➕", key="water_plus", use_container_width=True):
+            st.session_state.water_glasses += 1
+            st.rerun()
+    with _wcols[2]:
+        if st.button("↺", key="water_reset", use_container_width=True, help="Reset to 0"):
+            st.session_state.water_glasses = 0
+            st.rerun()
+
+    if _pct >= 100:
+        st.success("Daily target reached!")
+
+    st.divider()
+
+    # ── Controls ─────────────────────────────────────────────────
+    show_base = False  # technique comparison disabled for production
 
     if st.button("🗑️ Clear conversation", use_container_width=True):
         context_id = str(uuid.uuid4())
@@ -1455,6 +1834,7 @@ with st.sidebar:
             "calendar_sync_requested": False,
         }
         st.session_state.profile_form_pending = False
+        st.session_state.water_glasses = 0
         st.rerun()
 
     st.divider()
@@ -1560,17 +1940,6 @@ with st.sidebar:
         st.caption("Generate a plan to enable Google Fit sync.")
 
     st.divider()
-
-    # ── Live logs panel ──────────────────────────────────────────
-    with st.expander("🪵 Logs", expanded=False):
-        if _LOG_BUFFER:
-            log_text = "\n".join(list(_LOG_BUFFER)[-80:])
-            st.code(log_text, language="text")
-            if st.button("Clear", key="clear_logs"):
-                _LOG_BUFFER.clear()
-                st.rerun()
-        else:
-            st.caption("No logs yet.")
 
     st.markdown(
         '<div style="text-align:center;padding:1rem 0;color:#444;font-size:0.65rem;">'

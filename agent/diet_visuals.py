@@ -73,6 +73,32 @@ def extract_macros_from_plan(text: str) -> dict[str, float]:
     return result
 
 
+def extract_hydration_target(text: str) -> dict[str, float]:
+    """Extract daily hydration target (litres) from the diet plan markdown.
+
+    Returns dict with ``rest_day_liters`` and/or ``training_day_liters``.
+    """
+    result: dict[str, float] = {}
+
+    # Pattern: ~2.9 L (rest days) / ~3.4 L (training days)
+    m_rest = re.search(r"~?([\d.]+)\s*L\s*\(rest", text, re.IGNORECASE)
+    m_train = re.search(r"~?([\d.]+)\s*L\s*\(training", text, re.IGNORECASE)
+    if m_rest:
+        result["rest_day_liters"] = float(m_rest.group(1))
+    if m_train:
+        result["training_day_liters"] = float(m_train.group(1))
+
+    # Fallback: "Daily target: ~X.X L" (single value)
+    if not result:
+        m = re.search(r"Daily target:\s*~?([\d.]+)\s*L", text, re.IGNORECASE)
+        if m:
+            val = float(m.group(1))
+            result["rest_day_liters"] = val
+            result["training_day_liters"] = val
+
+    return result
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Macro Donut Chart
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -82,10 +108,13 @@ def create_macro_donut_chart(
     carbs_g: float,
     fat_g: float,
     total_kcal: float = 0,
+    *,
+    compact: bool = False,
 ) -> plt.Figure:
     """Create a dark-themed donut chart for macro distribution.
 
     Uses gram values directly (more accurate than percentage extraction).
+    Set ``compact=True`` for a sidebar-sized version (~2.8 in).
     """
     protein_kcal = protein_g * 4
     carbs_kcal = carbs_g * 4
@@ -98,22 +127,26 @@ def create_macro_donut_chart(
 
     colors = ["#2ecc71", "#3498db", "#e74c3c"]
 
-    fig, ax = plt.subplots(figsize=(4.5, 4.5), facecolor="#0a0a0a")
+    _size = 2.8 if compact else 4.5
+    fig, ax = plt.subplots(figsize=(_size, _size), facecolor="#0a0a0a")
     ax.set_facecolor("#0a0a0a")
 
+    _ring_width = 0.5 if compact else 0.45
     wedges, texts = ax.pie(
         sizes,
         colors=colors,
         startangle=90,
-        wedgeprops=dict(width=0.45, edgecolor="#0a0a0a", linewidth=2),
-        textprops={"color": "white", "fontsize": 10, "fontweight": "bold"},
+        wedgeprops=dict(width=_ring_width, edgecolor="#0a0a0a", linewidth=2),
+        textprops={"color": "white", "fontsize": 8 if compact else 10, "fontweight": "bold"},
     )
 
     # Centre text
+    _title_fs = 18 if compact else 28
+    _sub_fs = 7 if compact else 10
     ax.text(0, 0.08, f"{display_total:.0f}", ha="center", va="center",
-            fontsize=28, fontweight="900", color="white", fontfamily="sans-serif")
-    ax.text(0, -0.15, "kcal/day", ha="center", va="center",
-            fontsize=10, color="#888888", fontfamily="sans-serif")
+            fontsize=_title_fs, fontweight="900", color="white", fontfamily="sans-serif")
+    ax.text(0, -0.18, "kcal/day", ha="center", va="center",
+            fontsize=_sub_fs, color="#888888", fontfamily="sans-serif")
 
     # Legend below
     legend_labels = [
@@ -122,10 +155,11 @@ def create_macro_donut_chart(
         f"Fat         {fat_g:.0f}g  ({pcts[2]:.0f}%)",
     ]
     patches = [plt.Rectangle((0, 0), 1, 1, fc=c) for c in colors]
+    _legend_fs = 7 if compact else 9
     ax.legend(
         patches, legend_labels,
-        loc="lower center", bbox_to_anchor=(0.5, -0.12),
-        fontsize=9, frameon=False, ncol=1,
+        loc="lower center", bbox_to_anchor=(0.5, -0.15 if compact else -0.12),
+        fontsize=_legend_fs, frameon=False, ncol=1,
         labelcolor="white",
     )
 

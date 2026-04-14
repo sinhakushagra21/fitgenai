@@ -36,6 +36,7 @@ class DietPlanRepository:
         session_id: str,
         profile_snapshot: dict[str, Any],
         plan_markdown: str,
+        structured_data: dict[str, Any] | None = None,
         status: str = "draft",
     ) -> ObjectId:
         """Insert a new diet plan.  Returns the inserted ``_id``."""
@@ -46,6 +47,7 @@ class DietPlanRepository:
             session_id=session_id,
             profile_snapshot=profile_snapshot,
             plan_markdown=plan_markdown,
+            structured_data=structured_data or {},
             status=status,
         )
         result = cls._col().insert_one(doc.model_dump())

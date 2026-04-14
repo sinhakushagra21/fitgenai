@@ -246,34 +246,120 @@ def missing_profile_fields(
 # ── message builders ─────────────────────────────────────────────────
 
 
+_FIELD_LABELS: dict[str, str] = {
+    "name": "Name",
+    "age": "Age",
+    "sex": "Sex",
+    "height_cm": "Height",
+    "weight_kg": "Weight",
+    "goal": "Goal",
+    "goal_weight": "Goal Weight",
+    "weight_loss_pace": "Pace",
+    "activity_level": "Activity Level",
+    "diet_preference": "Diet",
+    "job_type": "Job Type",
+    "exercise_frequency": "Exercise Freq",
+    "exercise_type": "Exercise Type",
+    "sleep_hours": "Sleep",
+    "stress_level": "Stress",
+    "alcohol_intake": "Alcohol",
+    "favourite_meals": "Favourite Meals",
+    "foods_to_avoid": "Foods to Avoid",
+    "allergies": "Allergies",
+    "cooking_style": "Cooking Style",
+    "food_adventurousness": "Adventurousness",
+    "current_snacks": "Current Snacks",
+    "snack_reason": "Snack Reason",
+    "snack_preference": "Snack Preference",
+    "late_night_snacking": "Late-night Snacking",
+    "experience_level": "Experience",
+    "training_days_per_week": "Training Days",
+    "session_duration": "Session Length",
+    "daily_steps": "Daily Steps",
+    "additional_info": "Notes",
+}
+
+_FIELD_SECTIONS: dict[str, list[str]] = {
+    "Body & Goals": [
+        "name", "age", "sex", "height_cm", "weight_kg",
+        "goal", "goal_weight", "weight_loss_pace", "activity_level",
+        "experience_level",
+    ],
+    "Lifestyle": [
+        "job_type", "exercise_frequency", "exercise_type",
+        "training_days_per_week", "session_duration", "daily_steps",
+        "sleep_hours", "stress_level", "alcohol_intake",
+    ],
+    "Food Preferences": [
+        "diet_preference", "favourite_meals", "foods_to_avoid",
+        "allergies", "cooking_style", "food_adventurousness",
+    ],
+    "Snack Habits": [
+        "current_snacks", "snack_reason", "snack_preference",
+        "late_night_snacking",
+    ],
+    "Other": [
+        "additional_info",
+    ],
+}
+
+_FIELD_UNITS: dict[str, str] = {
+    "height_cm": "cm",
+    "weight_kg": "kg",
+    "sleep_hours": "hrs",
+}
+
+
+def _format_value(field: str, value: Any) -> str:
+    """Format a profile value for display."""
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    unit = _FIELD_UNITS.get(field, "")
+    return f"{value} {unit}".strip() if unit else str(value)
+
+
 def build_profile_confirmation(
     profile: dict[str, Any],
     required_fields: list[str],
 ) -> str:
-    """Format a human-readable confirmation message from *profile*.
+    """Format a styled confirmation message from *profile*.
 
-    Only fields present in both *profile* and *required_fields* are
-    shown, preserving the order of *required_fields*.
-
-    Args:
-        profile: The current user-profile dictionary.
-        required_fields: Ordered list of field names to display.
-
-    Returns:
-        A multi-line confirmation string ready to send to the user.
+    Groups fields into logical sections with a markdown table per
+    section. Only fields present in both *profile* and *required_fields*
+    are shown.
     """
-    lines: list[str] = []
-    for field in required_fields:
-        if field in profile and profile[field] not in (None, ""):
-            label = field.replace("_", " ").title()
-            lines.append(f"- {label}: {profile[field]}")
+    present = {
+        f for f in required_fields
+        if f in profile and profile[f] not in (None, "")
+    }
 
-    joined = "\n".join(lines) if lines else "- (No fields mapped yet)"
-    return (
-        "I mapped these details:\n"
-        f"{joined}\n\n"
-        "Reply yes to confirm, or share corrections."
+    if not present:
+        return (
+            "I couldn't map any details yet. "
+            "Please share your info so I can build your plan."
+        )
+
+    parts: list[str] = ["Here's your profile — please confirm or correct:\n"]
+
+    for section_name, section_fields in _FIELD_SECTIONS.items():
+        rows = []
+        for f in section_fields:
+            if f in present:
+                label = _FIELD_LABELS.get(f, f.replace("_", " ").title())
+                val = _format_value(f, profile[f])
+                rows.append(f"| {label} | {val} |")
+        if rows:
+            parts.append(f"**{section_name}**\n")
+            parts.append("| Field | Value |")
+            parts.append("|-------|-------|")
+            parts.extend(rows)
+            parts.append("")  # blank line
+
+    parts.append(
+        "Does this look right? Reply **yes** to confirm, "
+        "or tell me what to change."
     )
+    return "\n".join(parts)
 
 
 def build_profile_bulk_question(fields: list[str]) -> str:

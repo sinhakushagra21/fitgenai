@@ -228,6 +228,22 @@ make up the difference" — put it IN the table.
 registered dietitian or physician before making significant dietary \
 changes, especially if you have underlying health conditions."
 
+## Structured Data Block (MANDATORY — append after disclaimer)
+After the disclaimer, you MUST append a hidden HTML comment block \
+containing a JSON summary of the plan's key numbers. This is used by \
+the app's dashboard — the user never sees it.
+
+Format (copy exactly, fill in the numbers from YOUR plan):
+<!-- FITGEN_DATA
+{"macros": {"protein_g": <number>, "carbs_g": <number>, "fat_g": <number>, "calories": <number>}, "hydration": {"rest_day_liters": <number>, "training_day_liters": <number>}}
+-->
+
+Rules:
+- Use the EXACT macro targets from your Macro Summary (Section 2).
+- Hydration values come from your Hydration Target (Section 7).
+- Numbers only — no units, no strings, no trailing text.
+- This block MUST be the very last thing in your response.
+
 ---
 
 # Edge Cases
@@ -260,7 +276,8 @@ _DIET_FOOTER = """
 9. Include all 8 sections (calories, macros, 7-day plan, snack swaps, \
    personal rules, timeline, hydration, supplements).
 10. Keep the tone fun and motivating throughout — not clinical.
-11. Stop after the disclaimer.
+11. ALWAYS end with the <!-- FITGEN_DATA ... --> JSON block AFTER the \
+    disclaimer. This is mandatory for every plan response.
 """
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

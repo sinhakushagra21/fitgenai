@@ -50,6 +50,7 @@ class PlanDocument(BaseModel):
     session_id: str = ""
     profile_snapshot: dict[str, Any] = Field(default_factory=dict)
     plan_markdown: str = ""
+    structured_data: dict[str, Any] = Field(default_factory=dict)
     status: str = "draft"  # draft | confirmed | archived
     calendar_synced: bool = False
     fit_synced: bool = False

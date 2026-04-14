@@ -25,6 +25,7 @@ from langgraph.prebuilt import InjectedState
 from agent.prompts.workout_prompts import WORKOUT_PROMPTS
 from agent.shared.llm_helpers import (
     answer_followup_question,
+    answer_plan_question,
     classify_intent,
     extract_profile_updates,
     extract_profile_updates_with_fallback,
@@ -44,6 +45,7 @@ from agent.shared.types import (
 )
 from agent.db.repositories.user_repo import UserRepository
 from agent.db.repositories.workout_plan_repo import WorkoutPlanRepository
+from agent.shared.plan_data import extract_plan_structured_data
 from agent.state_manager import StateManager
 from agent.tools.youtube_service import enrich_plan_with_videos
 from agent.tracing import trace
@@ -387,9 +389,13 @@ def _handle_create_workout(query: str, ctx: WorkoutSessionContext) -> str:
 
     # ── Step C: Profile confirmed → generate plan ──
     if step == "user_profile_mapped":
-        plan_markdown = generate_plan(
+        raw_plan = generate_plan(
             _DOMAIN, ctx.profile, query, ctx.system_prompt
         )
+
+        # Extract structured data (schedule) and strip from display
+        plan_markdown, structured_data = extract_plan_structured_data(raw_plan)
+
         # Enrich exercise tables with YouTube tutorial links
         plan_markdown = enrich_plan_with_videos(plan_markdown)
 
@@ -402,6 +408,7 @@ def _handle_create_workout(query: str, ctx: WorkoutSessionContext) -> str:
             step_name="plan_generated",
             intent="create_workout",
             plan_text=plan_markdown,
+            structured_data=structured_data,
             pending_question=(
                 "Please review your plan and tell me if you want any "
                 "changes, or confirm to proceed."
@@ -461,12 +468,14 @@ def _handle_confirm_workout(query: str, ctx: WorkoutSessionContext) -> str:
 
         # 3. Create confirmed plan in workout_plans collection
         plan_text = ctx.workflow.get("plan_text", ctx.plan_text)
+        _structured = ctx.workflow.get("structured_data", {})
         if plan_text:
             _plan_id = WorkoutPlanRepository.create(
                 user_id=_user_id,
                 session_id=ctx.session_id,
                 profile_snapshot=dict(ctx.profile),
                 plan_markdown=plan_text,
+                structured_data=_structured,
                 status="confirmed",
             )
             logger.info("[WorkoutFlow] Plan created & confirmed: plan_id=%s", _plan_id)
@@ -556,37 +565,23 @@ def _handle_update_workout(query: str, ctx: WorkoutSessionContext) -> str:
 
 
 def _handle_get_workout(query: str, ctx: WorkoutSessionContext) -> str:
-    """Handle get_workout intent — display current plan or prompt to create."""
-    # Try to load plan from MongoDB if not in session
-    if not ctx.plan_text and ctx.user_id:
+    """Handle get_workout intent — fetch workout plan from DB, let LLM answer."""
+    # Always fetch the workout plan from MongoDB — single source of truth.
+    _plan = ""
+    if ctx.user_id:
         latest = WorkoutPlanRepository.find_latest_by_user(ctx.user_id)
         if latest and latest.get("plan_markdown"):
-            ctx.plan_text = latest["plan_markdown"]
-            ctx.workflow["plan_text"] = ctx.plan_text
-            ctx.workflow["plan_id"] = str(latest["_id"])
+            _plan = latest["plan_markdown"]
 
-    if ctx.plan_text:
-        plan_display = ctx.plan_text
-
-        summary_lines = [
-            f"- {k.replace('_', ' ').title()}: {v}"
-            for k, v in ctx.profile.items()
-            if v not in (None, "")
-        ]
-        summary = "\n".join(summary_lines) if summary_lines else "- (No profile data)"
-
+    if not _plan:
         return _build(
-            f"Here's your current workout plan:\n\n"
-            f"**Your Profile:**\n{summary}\n\n"
-            f"**Your Plan:**\n{plan_display}",
+            "No workout plan found. Would you like me to "
+            "create one? Just say **create a workout plan**!",
             ctx,
         )
 
-    return _build(
-        "No workout plan found for this session. Would you like me to "
-        "create one? Just say **create a workout plan**!",
-        ctx,
-    )
+    answer = answer_plan_question(_DOMAIN, _plan, query)
+    return _build(answer, ctx)
 
 
 def _handle_delete_workout(query: str, ctx: WorkoutSessionContext) -> str:
@@ -742,8 +737,17 @@ def _handle_general_workout_query(
     query: str, ctx: WorkoutSessionContext,
 ) -> str:
     """Handle general_workout_query intent — contextual Q&A."""
+    # Use workout plan from MongoDB as context (avoids cross-domain mix-up)
+    _plan = ""
+    if ctx.user_id:
+        latest = WorkoutPlanRepository.find_latest_by_user(ctx.user_id)
+        if latest and latest.get("plan_markdown"):
+            _plan = latest["plan_markdown"]
+    if not _plan and ctx.workflow.get("domain") == "workout":
+        _plan = ctx.plan_text  # fallback to session only if same domain
+
     answer = answer_followup_question(
-        _DOMAIN, query, ctx.profile, ctx.plan_text, ctx.system_prompt,
+        _DOMAIN, query, ctx.profile, _plan, ctx.system_prompt,
     )
     return _build(answer, ctx)
 
