@@ -877,9 +877,9 @@ if not _is_authenticated:
 
     /* ── Login: center column acts as card ────────────── */
     [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
-        max-width: 460px;
+        max-width: 720px;
         margin: 0 auto;
-        padding-top: 6vh;
+        padding-top: 3vh;
         animation: fadeInUp 0.8s ease-out;
         position: relative;
         z-index: 1;
@@ -927,65 +927,299 @@ if not _is_authenticated:
     </style>
     """, unsafe_allow_html=True)
 
-    # ── Login page layout ─────────────────────────────────────────
-    # Glass-morphism card (entire block via CSS, content via markdown)
+    # ── Landing page CSS (animations + layout) ─────────────────────
+    st.markdown("""
+    <style>
+    /* ── Staggered entrance keyframes ────────────────── */
+    @keyframes landFadeUp {
+        from { opacity: 0; transform: translateY(32px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes landScaleIn {
+        from { opacity: 0; transform: scale(0.85); }
+        to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes shimmerGradient {
+        0%   { background-position: -200% center; }
+        100% { background-position:  200% center; }
+    }
+    @keyframes floatIcon {
+        0%, 100% { transform: translateY(0); }
+        50%      { transform: translateY(-6px); }
+    }
+    @keyframes glowPulse {
+        0%, 100% { box-shadow: 0 0 12px rgba(255,107,43,0.15); }
+        50%      { box-shadow: 0 0 28px rgba(255,107,43,0.30); }
+    }
+    @keyframes drawArrow {
+        from { opacity: 0; transform: translateX(-8px); }
+        to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes numPop {
+        0%   { opacity: 0; transform: scale(0.5) rotate(-8deg); }
+        60%  { transform: scale(1.12) rotate(2deg); }
+        100% { opacity: 1; transform: scale(1) rotate(0deg); }
+    }
+
+    /* ── Logo ────────────────────────────────────────── */
+    .landing-logo {
+        width: 76px; height: 76px; margin: 0 auto 1.1rem auto;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 2.3rem;
+        background: radial-gradient(circle, rgba(255,107,43,0.10) 0%, transparent 70%);
+        border-radius: 50%;
+        animation: landScaleIn 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards,
+                   glowPulse 3s ease-in-out 0.8s infinite;
+        opacity: 0;
+    }
+
+    /* ── Title (shimmer gradient) ────────────────────── */
+    .landing-title {
+        font-family: Inter, -apple-system, sans-serif;
+        font-size: 2.8rem; font-weight: 900;
+        text-align: center; letter-spacing: -0.03em;
+        margin-bottom: 0.2rem;
+        background: linear-gradient(
+            90deg, #ff6b2b 0%, #ff8f5e 25%, #e63946 50%, #ff8f5e 75%, #ff6b2b 100%
+        );
+        background-size: 200% auto;
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: landFadeUp 0.7s ease-out 0.15s forwards,
+                   shimmerGradient 6s linear 1.2s infinite;
+        opacity: 0;
+    }
+
+    /* ── Subtitle + tagline ─────────────────────────── */
+    .landing-subtitle {
+        text-align: center; color: #bbb; font-size: 1.05rem;
+        font-weight: 500; margin-bottom: 0.1rem;
+        animation: landFadeUp 0.7s ease-out 0.3s forwards;
+        opacity: 0;
+    }
+    .landing-tagline {
+        text-align: center; color: #555; font-size: 0.82rem;
+        margin-bottom: 2rem;
+        animation: landFadeUp 0.7s ease-out 0.45s forwards;
+        opacity: 0;
+    }
+
+    /* ── Feature cards ──────────────────────────────── */
+    .feature-row {
+        display: flex; gap: 1rem; margin-bottom: 2rem;
+    }
+    .feature-card {
+        flex: 1;
+        background: rgba(22, 22, 22, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 18px;
+        padding: 1.6rem 1.1rem 1.4rem;
+        text-align: center;
+        opacity: 0;
+        animation: landFadeUp 0.65s ease-out forwards;
+        transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1),
+                    border-color 0.35s ease,
+                    box-shadow 0.35s ease;
+    }
+    .feature-card:nth-child(1) { animation-delay: 0.5s; }
+    .feature-card:nth-child(2) { animation-delay: 0.65s; }
+    .feature-card:nth-child(3) { animation-delay: 0.8s; }
+    .feature-card:hover {
+        transform: translateY(-6px);
+        border-color: rgba(255, 107, 43, 0.35);
+        box-shadow: 0 12px 36px rgba(255, 107, 43, 0.08),
+                    0 0 0 1px rgba(255, 107, 43, 0.10);
+    }
+    .feature-icon {
+        font-size: 2rem; margin-bottom: 0.7rem;
+        display: inline-block;
+        animation: floatIcon 3s ease-in-out infinite;
+    }
+    .feature-card:nth-child(1) .feature-icon { animation-delay: 0s; }
+    .feature-card:nth-child(2) .feature-icon { animation-delay: 0.5s; }
+    .feature-card:nth-child(3) .feature-icon { animation-delay: 1s; }
+    .feature-name {
+        color: #eee; font-size: 0.9rem; font-weight: 700;
+        margin-bottom: 0.4rem;
+    }
+    .feature-desc {
+        color: #777; font-size: 0.73rem; line-height: 1.5;
+    }
+
+    /* ── How it works ───────────────────────────────── */
+    .how-section {
+        background: rgba(22, 22, 22, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        border-radius: 18px;
+        padding: 1.6rem 1.8rem 1.4rem;
+        margin-bottom: 2rem;
+        text-align: center;
+        opacity: 0;
+        animation: landFadeUp 0.7s ease-out 0.95s forwards;
+    }
+    .how-label {
+        color: #555; font-size: 0.62rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.15em;
+        margin-bottom: 1.2rem;
+    }
+    .how-row {
+        display: flex; align-items: flex-start;
+        justify-content: center; gap: 0.3rem;
+    }
+    .how-step { text-align: center; flex: 1; }
+    .how-num {
+        width: 34px; height: 34px; border-radius: 50%;
+        background: linear-gradient(135deg, #e63946 0%, #ff6b2b 100%);
+        color: white;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 0.78rem; font-weight: 800;
+        margin-bottom: 0.5rem;
+        animation: numPop 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards;
+        opacity: 0;
+    }
+    .how-step:nth-child(1) .how-num { animation-delay: 1.1s; }
+    .how-step:nth-child(3) .how-num { animation-delay: 1.3s; }
+    .how-step:nth-child(5) .how-num { animation-delay: 1.5s; }
+    .how-step-title {
+        color: #eee; font-size: 0.84rem; font-weight: 700;
+        margin-bottom: 0.2rem;
+    }
+    .how-step-desc { color: #666; font-size: 0.68rem; }
+    .how-arrow {
+        color: #444; font-size: 1.1rem;
+        padding-top: 0.35rem;
+        opacity: 0;
+        animation: drawArrow 0.4s ease-out forwards;
+    }
+    .how-arrow:nth-of-type(1) { animation-delay: 1.25s; }
+    .how-arrow:nth-of-type(2) { animation-delay: 1.45s; }
+
+    /* ── Stats bar ──────────────────────────────────── */
+    .stats-row {
+        display: flex; justify-content: space-around;
+        margin-bottom: 2rem; padding: 0.3rem 0;
+    }
+    .stat-item {
+        text-align: center;
+        opacity: 0;
+        animation: landScaleIn 0.5s ease-out forwards;
+    }
+    .stat-item:nth-child(1) { animation-delay: 1.5s; }
+    .stat-item:nth-child(2) { animation-delay: 1.6s; }
+    .stat-item:nth-child(3) { animation-delay: 1.7s; }
+    .stat-item:nth-child(4) { animation-delay: 1.8s; }
+    .stat-num {
+        color: #ff6b2b; font-size: 1.6rem; font-weight: 900;
+        font-style: italic; line-height: 1.2;
+    }
+    .stat-label {
+        color: #555; font-size: 0.58rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        margin-top: 0.15rem;
+    }
+
+    /* ── CTA card ───────────────────────────────────── */
+    .cta-card {
+        background: rgba(22, 22, 22, 0.65);
+        border: 1px solid rgba(255, 107, 43, 0.08);
+        border-radius: 18px;
+        padding: 1.6rem 1.5rem;
+        text-align: center;
+        margin-bottom: 1rem;
+        opacity: 0;
+        animation: landFadeUp 0.7s ease-out 1.9s forwards;
+    }
+    .cta-title {
+        color: #eee; font-size: 1.1rem; font-weight: 700;
+        margin-bottom: 0.3rem;
+    }
+    .cta-desc { color: #666; font-size: 0.8rem; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Logo + Title ──
     st.markdown(
-        '<div style="'
-        'background:rgba(22,22,22,0.65);'
-        'backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);'
-        'border:1px solid rgba(255,107,43,0.10);'
-        'border-radius:28px;'
-        'padding:2.5rem 2.5rem 1rem 2.5rem;'
-        'box-shadow:0 8px 40px rgba(0,0,0,0.35),0 0 80px rgba(255,107,43,0.03);'
-        '">'
-        # ── Logo icon
-        '<div style="'
-        'width:68px;height:68px;margin:0 auto 1.2rem auto;'
-        'display:flex;align-items:center;justify-content:center;'
-        'background:linear-gradient(135deg,rgba(255,107,43,0.14),rgba(230,57,70,0.14));'
-        'border-radius:20px;border:1px solid rgba(255,107,43,0.18);'
-        'font-size:1.9rem;animation:subtlePulse 3s ease-in-out infinite;'
-        '">&#x1F525;</div>'
-        # ── Title
-        '<div style="'
-        'font-family:Inter,sans-serif;font-size:2.2rem;font-weight:900;'
-        'text-align:center;letter-spacing:-0.02em;margin-bottom:0.3rem;'
-        'background:linear-gradient(135deg,#ff6b2b 0%,#ff8f5e 40%,#e63946 100%);'
-        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
-        'background-clip:text;'
-        '">FITGEN.AI</div>'
-        # ── Subtitle
-        '<div style="text-align:center;color:#777;font-size:0.92rem;'
-        'margin-bottom:0.2rem;">Your AI-powered personal fitness coach</div>'
-        # ── Feature pills
-        '<div style="display:flex;flex-wrap:wrap;justify-content:center;'
-        'gap:0.4rem;margin:1.2rem 0 1.5rem 0;">'
-        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
-        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
-        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
-        'Workout Plans</span>'
-        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
-        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
-        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
-        'Diet &amp; Nutrition</span>'
-        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
-        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
-        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
-        'Macro Tracking</span>'
-        '<span style="background:rgba(255,107,43,0.08);color:#cc6a3a;'
-        'padding:0.22rem 0.7rem;border-radius:20px;font-size:0.7rem;'
-        'font-weight:600;border:1px solid rgba(255,107,43,0.12);">'
-        'Calendar Sync</span>'
-        '</div>'
+        '<div class="landing-logo">&#x1F525;</div>'
+        '<div class="landing-title">FITGEN.AI</div>'
+        '<div class="landing-subtitle">Your AI-Powered Personal Fitness Coach</div>'
+        '<div class="landing-tagline">Train smarter. Eat better. Track everything.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Feature cards ──
+    st.markdown(
+        '<div class="feature-row">'
+        '  <div class="feature-card">'
+        '    <div class="feature-icon">💪</div>'
+        '    <div class="feature-name">AI Workout Plans</div>'
+        '    <div class="feature-desc">Periodized programs tailored to your goals, equipment &amp; schedule</div>'
+        '  </div>'
+        '  <div class="feature-card">'
+        '    <div class="feature-icon">🥦</div>'
+        '    <div class="feature-name">Smart Nutrition</div>'
+        '    <div class="feature-desc">7-day meal plans with macro targets, calorie calculations &amp; snack swaps</div>'
+        '  </div>'
+        '  <div class="feature-card">'
+        '    <div class="feature-icon">&#x1F4C5;</div>'
+        '    <div class="feature-name">Google Sync</div>'
+        '    <div class="feature-desc">Push meals to Calendar &amp; nutrition data to Google Fit automatically</div>'
+        '  </div>'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    # Google sign-in button (native Streamlit widget, styled white via CSS)
+    # ── How it works ──
+    st.markdown(
+        '<div class="how-section">'
+        '  <div class="how-label">HOW IT WORKS</div>'
+        '  <div class="how-row">'
+        '    <div class="how-step">'
+        '      <div class="how-num">1</div>'
+        '      <div class="how-step-title">Share Your Goals</div>'
+        '      <div class="how-step-desc">Tell us about yourself</div>'
+        '    </div>'
+        '    <div class="how-arrow">&rarr;</div>'
+        '    <div class="how-step">'
+        '      <div class="how-num">2</div>'
+        '      <div class="how-step-title">AI Builds Your Plan</div>'
+        '      <div class="how-step-desc">Personalized in seconds</div>'
+        '    </div>'
+        '    <div class="how-arrow">&rarr;</div>'
+        '    <div class="how-step">'
+        '      <div class="how-num">3</div>'
+        '      <div class="how-step-title">Sync &amp; Crush It</div>'
+        '      <div class="how-step-desc">Calendar + Google Fit</div>'
+        '    </div>'
+        '  </div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Stats bar ──
+    st.markdown(
+        '<div class="stats-row">'
+        '  <div class="stat-item"><div class="stat-num">6</div><div class="stat-label">AI Techniques</div></div>'
+        '  <div class="stat-item"><div class="stat-num">24+</div><div class="stat-label">Profile Fields</div></div>'
+        '  <div class="stat-item"><div class="stat-num">7-Day</div><div class="stat-label">Meal &amp; Workout Plans</div></div>'
+        '  <div class="stat-item"><div class="stat-num">100%</div><div class="stat-label">Personalized</div></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── CTA card ──
+    st.markdown(
+        '<div class="cta-card">'
+        '  <div class="cta-title">Ready to transform your fitness?</div>'
+        '  <div class="cta-desc">Sign in to get your personalized AI coaching experience</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Google sign-in button ──
     if _google_auth.is_configured:
         _login_url = _google_auth.get_login_url()
         st.link_button(
-            "\U0001f310  Sign in with Google",
+            "\U0001F680 Get Started with Google",
             _login_url,
             use_container_width=True,
         )
@@ -1019,7 +1253,7 @@ if not _is_authenticated:
     # Footer
     st.markdown(
         '<div style="text-align:center;color:#3a3a3a;font-size:0.7rem;'
-        'margin-top:1.5rem;letter-spacing:0.01em;">'
+        'margin-top:1.2rem;letter-spacing:0.01em;">'
         'Powered by OpenAI &middot; LangGraph &middot; MongoDB Atlas'
         '</div>',
         unsafe_allow_html=True,
@@ -2176,7 +2410,7 @@ if prompt:
 
             _status_stop.set()
             elapsed = perf_counter() - turn_start
-            status.update(label="Here you go!", state="complete")
+            status.update(label="Done!", state="complete")
             _ui_logger.info(
                 "[Turn %s] Stream completed in %.2fs with %d events",
                 turn_id,
@@ -2361,11 +2595,18 @@ if prompt:
     # ── Trigger profile form when entering profile collection step ──
     _synced_wf = st.session_state.agent_state.get("workflow", {})
     _synced_step = _synced_wf.get("step_completed") or _synced_wf.get("stage")
-    if _synced_step == "prompted_for_user_profile_data" and not st.session_state.profile_form_pending:
-        st.session_state.profile_form_pending = True
-        st.rerun()
-    elif _synced_step != "prompted_for_user_profile_data":
+    _synced_domain = _synced_wf.get("domain", "")
+    _prev_form_domain = st.session_state.get("_profile_form_domain", "")
+
+    if _synced_step == "prompted_for_user_profile_data":
+        # Rerun if form not yet pending, OR if domain switched (e.g. workout → diet)
+        if not st.session_state.profile_form_pending or _synced_domain != _prev_form_domain:
+            st.session_state.profile_form_pending = True
+            st.session_state._profile_form_domain = _synced_domain
+            st.rerun()
+    else:
         st.session_state.profile_form_pending = False
+        st.session_state._profile_form_domain = ""
 
     # ── Persist to display history ────────────────────────────────
     # Skip persisting when the form will take over (profile questions
