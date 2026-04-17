@@ -31,6 +31,7 @@ from agent.shared.llm_helpers import (
     extract_profile_updates,
     extract_profile_updates_with_fallback,
     generate_plan,
+    generate_plan_name,
 )
 from agent.shared.profile_utils import (
     build_profile_bulk_question,
@@ -46,9 +47,10 @@ from agent.shared.types import (
 )
 from agent.db.repositories.diet_plan_repo import DietPlanRepository
 from agent.db.repositories.user_repo import UserRepository
+from agent.error_utils import handle_exception
 from agent.shared.plan_data import extract_plan_structured_data
 from agent.state_manager import StateManager
-from agent.tracing import trace
+from agent.tracing import log_event, trace
 
 logger = logging.getLogger("fitgen.diet_tool")
 
@@ -57,6 +59,25 @@ logger = logging.getLogger("fitgen.diet_tool")
 _DOMAIN = "diet"
 _SYSTEM_PROMPT = DIET_PROMPTS["few_shot"]
 _VALID_INTENTS: list[str] = list(get_args(DietIntent))
+
+# Steps where a draft plan exists and can still be updated/confirmed.
+# Once confirmed or synced, the plan is in MongoDB — no longer a "draft".
+_DRAFT_PLAN_STEPS = frozenset({
+    "diet_plan_generated",
+    "updated_diet_plan",
+})
+
+# Steps that indicate the workflow is fully complete.
+_TERMINAL_STEPS = frozenset({
+    "diet_plan_synced_to_google_calendar",
+    "diet_plan_synced_to_google_fit",
+})
+
+# Intents that belong to the post-confirm sync flow.
+_SYNC_INTENTS = frozenset({
+    "sync_diet_to_google_calendar",
+    "sync_diet_to_google_fit",
+})
 
 
 # ── Session Context ──────────────────────────────────────────────────
@@ -87,10 +108,42 @@ class DietSessionContext:
         sm = StateManager.from_state(state)
         wf = dict(sm.workflow or {})
 
+        # ── Auto-reset completed / cross-domain workflows ───────
+        # After confirm / sync the plan is safely in MongoDB.
+        # Also reset if the workflow belongs to a different domain
+        # (e.g. workout workflow leftover when diet tool is called).
+        _step = wf.get("step_completed")
+        _wf_domain = wf.get("domain")
+        _is_completed = (
+            _step in _TERMINAL_STEPS
+            or _step == "diet_confirmed"
+            or (_step and "confirmed" in _step)      # catches workout_confirmed too
+            or (_step and "synced" in _step)          # catches any synced step
+        )
+        _is_cross_domain = _wf_domain and _wf_domain != _DOMAIN
+        if _is_completed or _is_cross_domain:
+            _plan_id = wf.get("plan_id") if not _is_cross_domain else None
+            logger.info(
+                "[DietFlow] Resetting workflow in from_state "
+                "(step=%s, domain=%s, cross=%s, plan_id=%s)",
+                _step, _wf_domain, _is_cross_domain, _plan_id,
+            )
+            wf = {"plan_id": _plan_id} if _plan_id else {}
+
         # Merge MongoDB stored profile (baseline) with session profile (overrides)
         profile: dict[str, Any] = {}
         if sm.user_email:
-            profile = UserRepository.get_merged_profile(sm.user_email, domain="diet")
+            try:
+                profile = UserRepository.get_merged_profile(sm.user_email, domain="diet")
+            except Exception as exc:  # noqa: BLE001
+                handle_exception(
+                    exc,
+                    module="diet_tool",
+                    context="load merged profile from MongoDB",
+                    level="WARNING",
+                    extra={"user_email": sm.user_email},
+                )
+                profile = {}
         profile.update(dict(sm.user_profile or {}))
 
         return cls(
@@ -255,6 +308,16 @@ def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
     )
 
     # Step 3: Classify intent via LLM (always, no shortcuts)
+    #
+    # has_plan is True ONLY when a draft plan is waiting for
+    # review/update/confirm.  After confirm or sync the plan lives
+    # in MongoDB — it's no longer a draft the user can "update".
+    # NOTE: from_state() already auto-resets confirmed/terminal
+    # workflows, so ctx is born clean in those cases.
+    _has_draft_plan = (
+        bool(ctx.plan_text)
+        and ctx.step_completed in _DRAFT_PLAN_STEPS
+    )
     try:
         classification = classify_intent(
             query,
@@ -263,10 +326,19 @@ def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
             step_completed=ctx.step_completed,
             user_profile=ctx.profile,
             pending_question=ctx.pending_question,
-            has_plan=bool(ctx.plan_text),
+            has_plan=_has_draft_plan,
         )
-    except Exception as exc:
-        logger.error("[DietFlow] Intent classification failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="diet_tool",
+            context="intent classification",
+            extra={
+                "session_id": ctx.session_id,
+                "step": ctx.step_completed,
+                "query_preview": query[:120],
+            },
+        )
         return _build(
             "I had trouble understanding your request. Please try again.",
             ctx,
@@ -274,14 +346,24 @@ def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
 
     intent = classification["user_intent"]
     reason = classification.get("reason", "")
-    logger.info(
-        "[DietFlow] intent=%s reason=%s", intent, reason[:80]
+    logger.info("Classified intent: %s (reason: %s)", intent, reason[:80])
+    log_event(
+        "diet.intent_classified",
+        module="diet_tool",
+        intent=intent,
+        step=ctx.step_completed,
     )
 
     # Step 4: Dispatch to handler
     handler = _INTENT_HANDLERS.get(intent)
     if handler is None:
-        logger.warning("[DietFlow] No handler for intent=%s", intent)
+        logger.warning("No handler registered for intent: %s", intent)
+        log_event(
+            "diet.missing_handler",
+            level="WARNING",
+            module="diet_tool",
+            intent=intent,
+        )
         return _build(
             f"I can help you create, update, delete, or view your {_DOMAIN} "
             "plan. What would you like to do?",
@@ -290,9 +372,16 @@ def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
 
     try:
         return handler(query, ctx)
-    except Exception as exc:
-        logger.error(
-            "[DietFlow] Handler %s failed: %s", intent, exc, exc_info=True
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="diet_tool",
+            context=f"handler:{intent}",
+            extra={
+                "session_id": ctx.session_id,
+                "step": ctx.step_completed,
+                "intent": intent,
+            },
         )
         return _build(
             "I had trouble processing your request. Please try again.",
@@ -411,6 +500,13 @@ def _handle_create_diet(query: str, ctx: DietSessionContext) -> str:
 
     # ── Step C: Profile confirmed → generate plan ──
     if step == "user_profile_mapped":
+        # The user may say "yes" OR "yes but change X to Y".
+        # Extract any last-minute profile tweaks before generating.
+        _tweaks = extract_profile_updates(query, DIET_ALL_FIELDS)
+        if _tweaks:
+            logger.info("[DietFlow] Applying last-minute profile tweaks: %s", _tweaks)
+            ctx.profile.update(_tweaks)
+
         raw_plan = generate_plan(
             _DOMAIN, ctx.profile, query, ctx.system_prompt
         )
@@ -489,9 +585,17 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
         UserRepository.update_profile(ctx.user_email, base=_base, diet=_diet)
         logger.info("[DietFlow] Profile saved to users collection for %s", ctx.user_email)
 
-        # 3. Create confirmed plan in diet_plans collection
+        # 3. Generate a catchy plan name via LLM
         plan_text = ctx.workflow.get("plan_text", ctx.plan_text)
         _structured = ctx.workflow.get("structured_data", {})
+        _plan_name = ""
+        if plan_text:
+            try:
+                _plan_name = generate_plan_name(_DOMAIN, ctx.profile, plan_text)
+            except Exception as exc:
+                logger.warning("[DietFlow] Plan naming failed: %s", exc)
+
+        # 4. Create confirmed plan in diet_plans collection
         if plan_text:
             _plan_id = DietPlanRepository.create(
                 user_id=_user_id,
@@ -500,13 +604,23 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
                 plan_markdown=plan_text,
                 structured_data=_structured,
                 status="confirmed",
+                name=_plan_name,
             )
-            logger.info("[DietFlow] Plan created & confirmed: plan_id=%s", _plan_id)
+            logger.info("[DietFlow] Plan created & confirmed: plan_id=%s name=%r", _plan_id, _plan_name)
     else:
         logger.warning(
             "[DietFlow] confirm_diet: no user_email — skipping MongoDB save. "
             "Set FITGEN_USER_EMAIL in .env to enable persistence."
         )
+
+    # ── Clean workflow — plan is in MongoDB, no need to carry it ──
+    # Keep only plan_id (for sync) and domain. Sync handlers use
+    # _resolve_plan_text() to fetch from MongoDB by plan_id.
+    ctx.workflow = {}
+    ctx.plan_text = ""
+    ctx.step_completed = None
+    ctx.completed_steps = []
+    ctx.pending_question = None
 
     _update_workflow(
         ctx,
@@ -514,6 +628,8 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
         step_name="diet_confirmed",
         intent="confirm_diet",
         plan_id=str(_plan_id) if _plan_id else None,
+        plan_text="",
+        structured_data={},
         pending_question=(
             "Would you like to sync to Google Calendar, Google Fit, or both?"
         ),
@@ -604,6 +720,13 @@ def _handle_get_diet(query: str, ctx: DietSessionContext) -> str:
             ctx,
         )
 
+    # get is a one-shot operation — clear workflow so next call starts fresh
+    ctx.workflow = {}
+    ctx.plan_text = ""
+    ctx.step_completed = None
+    ctx.completed_steps = []
+    ctx.pending_question = None
+
     answer = answer_plan_question(_DOMAIN, _plan, query)
     return _build(answer, ctx)
 
@@ -638,7 +761,7 @@ def _handle_delete_diet(query: str, ctx: DietSessionContext) -> str:
         step_completed=ctx.step_completed,
         user_profile=ctx.profile,
         pending_question=ctx.pending_question,
-        has_plan=bool(ctx.plan_text),
+        has_plan=bool(ctx.plan_text) and ctx.step_completed in _DRAFT_PLAN_STEPS,
     )
 
     if classification["user_intent"] == "confirm_diet":
@@ -675,12 +798,31 @@ def _handle_delete_diet(query: str, ctx: DietSessionContext) -> str:
     )
 
 
+def _resolve_plan_text(ctx: DietSessionContext) -> str:
+    """Get plan markdown — from ctx, workflow, or MongoDB (by plan_id)."""
+    if ctx.plan_text:
+        return ctx.plan_text
+    # After confirm, from_state() clears plan_text. Fetch from MongoDB.
+    _plan_id = ctx.workflow.get("plan_id")
+    if _plan_id:
+        doc = DietPlanRepository.find_by_id(_plan_id)
+        if doc and doc.get("plan_markdown"):
+            return doc["plan_markdown"]
+    # Last resort: latest confirmed plan for user
+    if ctx.user_id:
+        doc = DietPlanRepository.find_latest_by_user(ctx.user_id, status="confirmed")
+        if doc and doc.get("plan_markdown"):
+            return doc["plan_markdown"]
+    return ""
+
+
 def _handle_sync_to_google_calendar(
     query: str,
     ctx: DietSessionContext,
 ) -> str:
     """Handle sync_diet_to_google_calendar intent."""
-    if not ctx.plan_text:
+    _plan = _resolve_plan_text(ctx)
+    if not _plan:
         return _build(
             "You don't have a diet plan to sync yet. Create one first!",
             ctx,
@@ -695,7 +837,7 @@ def _handle_sync_to_google_calendar(
         auth_url, oauth_state = get_authorization_url()
 
         save_oauth_context(
-            plan_text=ctx.plan_text,
+            plan_text=_plan,
             domain=_DOMAIN,
             profile=ctx.profile,
             sync_target="calendar",
@@ -724,8 +866,13 @@ def _handle_sync_to_google_calendar(
             extra={"calendar_sync_requested": True, "calendar_auth_url": auth_url},
         )
 
-    except Exception as exc:
-        logger.error("[DietFlow] Calendar sync failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="diet_tool",
+            context="google calendar sync",
+            extra={"session_id": ctx.session_id},
+        )
         return _build(
             "I'd love to sync to Google Calendar, but the integration "
             "is not configured yet. Please check that GOOGLE_CLIENT_ID "
@@ -739,7 +886,8 @@ def _handle_sync_to_google_fit(
     ctx: DietSessionContext,
 ) -> str:
     """Handle sync_diet_to_google_fit intent."""
-    if not ctx.plan_text:
+    _plan = _resolve_plan_text(ctx)
+    if not _plan:
         return _build(
             "You don't have a diet plan to sync yet. Create one first!",
             ctx,
@@ -754,7 +902,7 @@ def _handle_sync_to_google_fit(
         auth_url, _oauth_state = get_authorization_url()
 
         save_oauth_context(
-            plan_text=ctx.plan_text,
+            plan_text=_plan,
             domain=_DOMAIN,
             profile=ctx.profile,
             sync_target="google_fit",
@@ -782,8 +930,13 @@ def _handle_sync_to_google_fit(
             extra={"google_fit_sync_requested": True},
         )
 
-    except Exception as exc:
-        logger.error("[DietFlow] Google Fit sync failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="diet_tool",
+            context="google fit sync",
+            extra={"session_id": ctx.session_id},
+        )
         return _build(
             "I'd love to sync to Google Fit, but the integration "
             "is not configured yet. Please check that GOOGLE_CLIENT_ID "

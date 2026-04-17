@@ -38,6 +38,7 @@ class DietPlanRepository:
         plan_markdown: str,
         structured_data: dict[str, Any] | None = None,
         status: str = "draft",
+        name: str = "",
     ) -> ObjectId:
         """Insert a new diet plan.  Returns the inserted ``_id``."""
         if isinstance(user_id, str):
@@ -45,13 +46,14 @@ class DietPlanRepository:
         doc = PlanDocument(
             user_id=user_id,
             session_id=session_id,
+            name=name,
             profile_snapshot=profile_snapshot,
             plan_markdown=plan_markdown,
             structured_data=structured_data or {},
             status=status,
         )
         result = cls._col().insert_one(doc.model_dump())
-        logger.info("Diet plan created: _id=%s user=%s", result.inserted_id, user_id)
+        logger.info("Diet plan created: _id=%s user=%s name=%r", result.inserted_id, user_id, name)
         return result.inserted_id
 
     # ── Read ─────────────────────────────────────────────────────
@@ -110,6 +112,7 @@ class DietPlanRepository:
         plan_markdown: str | None = None,
         profile_snapshot: dict[str, Any] | None = None,
         status: str | None = None,
+        name: str | None = None,
         calendar_synced: bool | None = None,
         fit_synced: bool | None = None,
     ) -> None:
@@ -124,6 +127,8 @@ class DietPlanRepository:
             set_fields["profile_snapshot"] = profile_snapshot
         if status is not None:
             set_fields["status"] = status
+        if name is not None:
+            set_fields["name"] = name
         if calendar_synced is not None:
             set_fields["calendar_synced"] = calendar_synced
         if fit_synced is not None:

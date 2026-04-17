@@ -25,7 +25,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from agent.config import DEFAULT_MODEL, FAST_MODEL
+from agent.error_utils import handle_exception
 from agent.shared.types import SEX_MAP
+from agent.tracing import log_event
 
 logger = logging.getLogger("fitgen.llm_helpers")
 
@@ -41,6 +43,7 @@ __all__ = [
     "answer_plan_question",
     "generate_plan",
     "generate_plan_as_json",
+    "generate_plan_name",
     "validate_plan_json",
     "plan_json_to_markdown",
 ]
@@ -62,6 +65,7 @@ def _llm_json(system: str, user: str, *, retries: int = 2) -> dict[str, Any]:
         Parsed JSON dict, or empty dict on total failure.
     """
     llm = ChatOpenAI(model=_FAST_MODEL, temperature=0)
+    last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
             resp = llm.invoke([
@@ -84,14 +88,38 @@ def _llm_json(system: str, user: str, *, retries: int = 2) -> dict[str, Any]:
                 except json.JSONDecodeError:
                     pass
 
-            logger.warning(
-                "_llm_json attempt %d: failed to parse JSON from response",
-                attempt,
+            log_event(
+                "llm_json.parse_failed",
+                level="WARNING",
+                module="llm_helpers",
+                attempt=attempt,
+                response_preview=text[:120],
             )
-        except Exception as exc:
-            logger.warning("_llm_json attempt %d error: %s", attempt, exc)
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            log_event(
+                "llm_json.invoke_failed",
+                level="WARNING",
+                module="llm_helpers",
+                attempt=attempt,
+                error_type=type(exc).__name__,
+                error_message=str(exc)[:200],
+            )
 
-    logger.error("_llm_json: all %d attempts failed", retries + 1)
+    if last_exc is not None:
+        handle_exception(
+            last_exc,
+            module="llm_helpers",
+            context="_llm_json (all retries failed)",
+            extra={"retries": retries + 1},
+        )
+    else:
+        log_event(
+            "llm_json.all_parse_failed",
+            level="ERROR",
+            module="llm_helpers",
+            retries=retries + 1,
+        )
     return {}
 
 
@@ -423,13 +451,26 @@ def answer_followup_question(
         f'"{query}"\n\n'
         "Answer their question directly and concisely. Stay within the "
         "context of their plan and profile. Do NOT regenerate the full plan. "
-        "Just answer the specific question."
+        "Just answer the specific question. "
+        "NEVER use LaTeX (no \\text{}, \\textbf{}, $...$). Use plain markdown."
     )
-    resp = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=prompt),
-    ])
-    return resp.content
+    try:
+        resp = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=prompt),
+        ])
+        return resp.content
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="llm_helpers",
+            context="answer_followup_question",
+            extra={"domain": domain, "query_preview": query[:120]},
+        )
+        return (
+            "I'm having trouble answering your question right now. "
+            "Please try again in a moment."
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -453,6 +494,7 @@ Rules:
   plan", "get my diet plan", "display my workout"), return the FULL plan as-is.
 - Be concise and directly helpful.
 - If the plan doesn't contain the answer, say so honestly.
+- NEVER use LaTeX (no \\text{{}}, \\textbf{{}}, $...$). Use plain markdown only.
 """
 
 
@@ -471,13 +513,28 @@ def answer_plan_question(
     today = datetime.now()
     tomorrow = today + timedelta(days=1)
 
-    system = _PLAN_QA_SYSTEM.format(
-        domain=domain,
-        today=today.strftime("%A, %B %d"),
-        today_weekday=today.strftime("%A"),
-        tomorrow=tomorrow.strftime("%A, %B %d"),
-        tomorrow_weekday=tomorrow.strftime("%A"),
-    )
+    try:
+        system = _PLAN_QA_SYSTEM.format(
+            domain=domain,
+            today=today.strftime("%A, %B %d"),
+            today_weekday=today.strftime("%A"),
+            tomorrow=tomorrow.strftime("%A, %B %d"),
+            tomorrow_weekday=tomorrow.strftime("%A"),
+        )
+    except (KeyError, IndexError, ValueError) as exc:
+        handle_exception(
+            exc,
+            module="llm_helpers",
+            context="answer_plan_question format prompt",
+            level="WARNING",
+        )
+        # Fallback: use the template without date substitutions
+        system = (
+            f"You are a helpful fitness and nutrition assistant. "
+            f"The user has an existing {domain} plan. Respond using "
+            f"ONLY information from this plan. Today is "
+            f"{today.strftime('%A, %B %d')}. Use plain markdown only."
+        )
 
     user_msg = (
         f"## User's {domain} plan:\n\n"
@@ -486,12 +543,24 @@ def answer_plan_question(
         f"## User's question:\n{question}"
     )
 
-    llm = ChatOpenAI(model=_FAST_MODEL, temperature=0.3, max_tokens=4096)
-    resp = llm.invoke([
-        SystemMessage(content=system),
-        HumanMessage(content=user_msg),
-    ])
-    return resp.content
+    try:
+        llm = ChatOpenAI(model=_FAST_MODEL, temperature=0.3, max_tokens=4096)
+        resp = llm.invoke([
+            SystemMessage(content=system),
+            HumanMessage(content=user_msg),
+        ])
+        return resp.content
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="llm_helpers",
+            context="answer_plan_question LLM call",
+            extra={"domain": domain, "question_preview": question[:120]},
+        )
+        return (
+            "I'm having trouble answering your question right now. "
+            "Please try again in a moment."
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -545,11 +614,24 @@ def generate_plan(
             "EXACTLY. Include ALL required sections in order."
         )
 
-    resp = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=prompt),
-    ])
-    return resp.content
+    try:
+        resp = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=prompt),
+        ])
+        return resp.content
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="llm_helpers",
+            context="generate_plan",
+            extra={
+                "domain": domain,
+                "existing_plan": bool(existing_plan),
+                "query_preview": query[:120],
+            },
+        )
+        raise  # Let the caller handle it — this is a critical operation
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -579,6 +661,62 @@ Example top-level structure (adapt sections to your Output Contract):
   "disclaimer": "..."
 }
 """
+
+
+def generate_plan_name(
+    domain: str,
+    profile: dict[str, Any],
+    plan_markdown: str,
+) -> str:
+    """Generate a short, catchy name for a plan using the fast LLM.
+
+    Returns a 3-6 word title like "Lean Muscle Power Blueprint" or
+    "Clean Eating Fat Burn Plan". Falls back to a generic name on error.
+    """
+    goal = (
+        profile.get("primary_goal")
+        or profile.get("goal")
+        or ""
+    )
+    # Take the first ~500 chars of plan markdown for context — enough to
+    # understand the flavour without burning tokens.
+    snippet = plan_markdown[:500] if plan_markdown else ""
+
+    system = (
+        "You are a creative fitness branding assistant. "
+        "Generate a SHORT, catchy name (3-6 words, no quotes) for the "
+        f"{domain} plan described below. "
+        "The name should feel motivating and unique. "
+        "Examples: 'Lean Muscle Power Blueprint', 'Clean Burn Nutrition Plan', "
+        "'Iron Core Strength Program', 'Mediterranean Vitality Diet'. "
+        "Return ONLY the plan name — nothing else."
+    )
+    user_msg = f"Goal: {goal}\nDomain: {domain}\nPlan excerpt:\n{snippet}"
+
+    try:
+        llm = ChatOpenAI(model=_FAST_MODEL, temperature=0.8, max_tokens=30)
+        resp = llm.invoke([
+            SystemMessage(content=system),
+            HumanMessage(content=user_msg),
+        ])
+        name = resp.content.strip().strip('"').strip("'").strip()
+        # Sanity: limit to 60 chars, single line
+        name = name.split("\n")[0][:60]
+        if name:
+            return name
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="llm_helpers",
+            context="generate_plan_name",
+            level="WARNING",
+            extra={"domain": domain},
+        )
+
+    # Fallback
+    _label = "Diet" if domain == "diet" else "Workout"
+    _goal_str = f" — {goal.title()}" if goal else ""
+    return f"My {_label} Plan{_goal_str}"
 
 
 def generate_plan_as_json(
@@ -661,15 +799,21 @@ def generate_plan_as_json(
                 )
                 return parsed
 
-            logger.warning(
-                "[generate_plan_as_json] Attempt %d: could not parse JSON "
-                "(response length=%d)",
-                attempt,
-                len(raw),
+            log_event(
+                "plan_json.parse_failed",
+                level="WARNING",
+                module="llm_helpers",
+                attempt=attempt,
+                response_length=len(raw),
             )
-        except Exception as exc:
-            logger.warning(
-                "[generate_plan_as_json] Attempt %d error: %s", attempt, exc
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                "plan_json.invoke_failed",
+                level="WARNING",
+                module="llm_helpers",
+                attempt=attempt,
+                error_type=type(exc).__name__,
+                error_message=str(exc)[:200],
             )
 
     raise ValueError(

@@ -258,6 +258,11 @@ drafts, "Option A / Option B" variants, or "adjusted" programmes. \
 Verify all decisions internally FIRST, then present the single final \
 programme.
 
+## Formatting Rules
+- **NEVER use LaTeX** — no \\text{}, \\textbf{}, \\frac{}, \\times, \
+  $...$ or $$...$$ math blocks. Use plain markdown only: **bold**, \
+  `code`, × (unicode multiply sign), and standard arithmetic notation.
+
 ## Structured Data Block (MANDATORY — append after disclaimer)
 After the disclaimer, you MUST append a hidden HTML comment block \
 containing a JSON summary of the weekly training schedule. This is \

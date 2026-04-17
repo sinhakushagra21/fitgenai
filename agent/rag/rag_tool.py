@@ -25,8 +25,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from agent.error_utils import handle_exception
 from agent.rag.retriever import retrieve, format_context
-from agent.tracing import trace, get_langsmith_config
+from agent.tracing import trace, get_langsmith_config, log_event
 
 logger = logging.getLogger("fitgen.rag_tool")
 
@@ -74,26 +75,79 @@ def rag_query_tool(query: str) -> str:
     Returns:
         A JSON object with the RAG response and retrieved sources.
     """
-    logger.info("[RAGTool] Query: %s", query[:80])
+    logger.info("Query: %s", query[:80])
     t0 = time.perf_counter()
 
     # 1. Retrieve relevant documents
-    docs = retrieve(query, k=3)
-    context = format_context(docs)
-    logger.info("[RAGTool] Retrieved %d documents", len(docs))
+    try:
+        docs = retrieve(query, k=3)
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="rag_tool",
+            context="retrieval",
+            extra={"query_preview": query[:120]},
+        )
+        return json.dumps({
+            "response": (
+                "I couldn't search the knowledge base right now. Please try "
+                "again in a moment."
+            ),
+            "sources": [],
+            "retrieval_time_s": 0.0,
+            "error": "retrieval_failed",
+        }, ensure_ascii=False)
+
+    try:
+        context = format_context(docs)
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="rag_tool",
+            context="format retrieval context",
+            extra={"n_docs": len(docs)},
+        )
+        context = ""
+
+    log_event(
+        "rag.retrieved",
+        module="rag_tool",
+        n_docs=len(docs),
+        query_preview=query[:120],
+    )
 
     # 2. Build augmented prompt
     system = _RAG_SYSTEM_PROMPT.format(context=context)
 
     # 3. Generate response
-    llm = ChatOpenAI(model=MODEL, temperature=0.3)
-    response = llm.invoke(
-        [SystemMessage(content=system), HumanMessage(content=query)],
-        config=get_langsmith_config("RAG Response Generation", tags=["rag"]),
-    )
+    try:
+        llm = ChatOpenAI(model=MODEL, temperature=0.3)
+        response = llm.invoke(
+            [SystemMessage(content=system), HumanMessage(content=query)],
+            config=get_langsmith_config("RAG Response Generation", tags=["rag"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="rag_tool",
+            context="LLM generation",
+            extra={"query_preview": query[:120], "n_docs": len(docs)},
+        )
+        return json.dumps({
+            "response": (
+                "I retrieved the evidence but hit a problem generating the "
+                "answer. Please try again."
+            ),
+            "sources": [
+                {"title": d["title"], "source": d["source"], "score": d["score"]}
+                for d in docs
+            ],
+            "retrieval_time_s": round(time.perf_counter() - t0, 3),
+            "error": "llm_failed",
+        }, ensure_ascii=False)
 
     elapsed = time.perf_counter() - t0
-    logger.info("[RAGTool] Response generated in %.2fs", elapsed)
+    logger.info("Response generated in %.2fs", elapsed)
 
     # 4. Package result
     result = {

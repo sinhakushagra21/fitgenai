@@ -27,12 +27,21 @@ logger = logging.getLogger("fitgen.persistence")
 
 
 def init_db() -> None:
-    """Initialize the database — creates MongoDB indexes.
+    """Initialize the database — creates MongoDB indexes and cleans stale data.
 
     Safe to call on every startup (idempotent).
     """
     init_indexes()
-    logger.info("Database initialized (MongoDB indexes ensured).")
+
+    # Proactive cleanup: remove completed and expired sessions on startup.
+    # This catches anything MongoDB's TTL index hasn't swept yet.
+    try:
+        SessionRepository.cleanup_completed()
+        SessionRepository.cleanup_stale()
+    except Exception as exc:
+        logger.warning("Session cleanup on startup failed (non-fatal): %s", exc)
+
+    logger.info("Database initialized (MongoDB indexes ensured, stale sessions cleaned).")
 
 
 # ── Context / Session state ──────────────────────────────────────

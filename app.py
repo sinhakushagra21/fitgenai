@@ -22,7 +22,8 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, ToolMessage
 
 from agent import create_graph
-from agent.persistence import get_context_state, get_latest_context_state_by_email, init_db
+from agent.logging_config import setup_logging
+from agent.persistence import init_db
 from agent.db.repositories.user_repo import UserRepository
 
 
@@ -53,6 +54,9 @@ def main() -> None:
     # ── Load environment variables ───────────────────────────────
     load_dotenv()
 
+    # ── Configure human-readable logging ────────────────────────
+    setup_logging()
+
     if not os.getenv("OPENAI_API_KEY"):
         print("❌  OPENAI_API_KEY not found. Copy .env.example → .env and add your key.")
         sys.exit(1)
@@ -63,11 +67,10 @@ def main() -> None:
 
     # ── Conversation state ───────────────────────────────────────
     user_email = os.getenv("FITGEN_USER_EMAIL", "").strip()
-    context_id = os.getenv("FITGEN_CONTEXT_ID", str(uuid.uuid4()))
-    restored = get_context_state(context_id) or get_latest_context_state_by_email(user_email) or {}
-    context_id = restored.get("context_id", context_id)
+    # Always start a fresh session — each run gets a clean workflow.
+    context_id = str(uuid.uuid4())
 
-    # Load existing user record from MongoDB (don't create until plan confirm)
+    # Load existing user profile from MongoDB (don't create until plan confirm)
     user_id = ""
     mongo_profile: dict = {}
     if user_email:
@@ -76,17 +79,15 @@ def main() -> None:
             user_id = str(existing_user["_id"])
             mongo_profile = UserRepository.get_merged_profile(user_email)
 
-    merged_profile = {**mongo_profile, **restored.get("user_profile", {})}
-
     state = {
         "messages": [],
-        "user_profile": merged_profile,
-        "user_email": user_email or restored.get("user_email", ""),
+        "user_profile": mongo_profile,
+        "user_email": user_email or "",
         "user_id": user_id,
         "context_id": context_id,
         "state_id": context_id,
-        "workflow": restored.get("workflow", {}),
-        "calendar_sync_requested": restored.get("calendar_sync_requested", False),
+        "workflow": {},                          # Always fresh
+        "calendar_sync_requested": False,
     }
 
     print(f"🔖  Context ID: {context_id}")

@@ -35,8 +35,9 @@ from langchain_openai import ChatOpenAI
 
 from agent import AgentState, create_graph
 from agent.feedback import get_average_rating, save_feedback
-from agent.persistence import get_context_state, get_latest_context_state_by_email, init_db
+from agent.persistence import init_db
 from agent.config import DEFAULT_MODEL, FAST_MODEL
+from agent.logging_config import setup_logging
 from agent.prompts.base_prompts import BASE_PROMPTS
 from agent.prompts.techniques import TECHNIQUE_KEYS, TECHNIQUE_META
 from agent.shared.types import DOMAIN_REQUIRED_FIELDS
@@ -61,41 +62,27 @@ class _BufferHandler(logging.Handler):
 
 
 def _configure_logging() -> None:
-    """Configure console + UI-buffer logging exactly once per process."""
-    level_name = os.getenv("FITGEN_LOG_LEVEL", "DEBUG").upper()
-    level = getattr(logging, level_name, logging.DEBUG)
+    """Configure console + UI-buffer logging exactly once per process.
 
-    root = logging.getLogger()
-    root.setLevel(level)
-
-    if not any(getattr(h, "_fitgen_console", False) for h in root.handlers):
-        console = logging.StreamHandler()
-        console._fitgen_console = True  # type: ignore[attr-defined]
-        console.setLevel(level)
-        console.setFormatter(logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-            "%H:%M:%S",
-        ))
-        root.addHandler(console)
+    Delegates the console handler + format + noisy-logger muting to
+    :func:`agent.logging_config.setup_logging`, then attaches a Streamlit
+    log-viewer buffer so the user can read backend logs in the sidebar.
+    """
+    # Root + fitgen console handler, colour, noisy-logger muting.
+    setup_logging()
 
     fitgen = logging.getLogger("fitgen")
-    fitgen.setLevel(level)
-    fitgen.propagate = True
+    # Attach the UI buffer handler (idempotent).
     if not any(isinstance(h, _BufferHandler) for h in fitgen.handlers):
+        from agent.logging_config import FitgenFormatter
         buffer_handler = _BufferHandler()
-        buffer_handler.setLevel(level)
-        buffer_handler.setFormatter(logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-            "%H:%M:%S",
-        ))
+        buffer_handler.setFormatter(FitgenFormatter(use_colour=False))
         fitgen.addHandler(buffer_handler)
 
 
 _configure_logging()
 _ui_logger = logging.getLogger("fitgen.streamlit")
-
 _fitgen_logger = logging.getLogger("fitgen")
-_fitgen_logger.setLevel(logging.DEBUG)
 
 # ── Page config ───────────────────────────────────────────────────
 st.set_page_config(
@@ -481,6 +468,85 @@ hr {
 .stChatMessage p {
     line-height: 1.65 !important;
     margin-bottom: 0.5rem !important;
+}
+
+/* ── Tables inside chat messages ───────────────────── */
+.stChatMessage table {
+    width: 100% !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    margin: 0.8rem 0 1rem 0 !important;
+    border: 1px solid rgba(255,107,43,0.15) !important;
+    font-size: 0.84rem !important;
+}
+.stChatMessage thead th {
+    background: linear-gradient(135deg, rgba(255,107,43,0.18) 0%, rgba(230,57,70,0.12) 100%) !important;
+    color: #f5f5f5 !important;
+    font-weight: 700 !important;
+    font-size: 0.78rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+    padding: 0.65rem 0.75rem !important;
+    border-bottom: 2px solid rgba(255,107,43,0.25) !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+}
+.stChatMessage tbody td {
+    padding: 0.55rem 0.75rem !important;
+    color: var(--text-secondary) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.04) !important;
+    transition: background 0.2s ease, color 0.2s ease !important;
+    vertical-align: top !important;
+}
+.stChatMessage tbody tr:nth-child(even) td {
+    background: rgba(255,255,255,0.015) !important;
+}
+.stChatMessage tbody tr:hover td {
+    background: rgba(255,107,43,0.06) !important;
+    color: var(--text-primary) !important;
+}
+/* First column bold (meal/exercise name) */
+.stChatMessage tbody td:first-child {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+}
+/* Last row in tbody = totals row — highlight it */
+.stChatMessage tbody tr:last-child td {
+    font-weight: 700 !important;
+    color: var(--accent-orange) !important;
+    border-top: 2px solid rgba(255,107,43,0.2) !important;
+    background: rgba(255,107,43,0.04) !important;
+}
+
+/* ── Blockquotes (tips / notes) ────────────────────── */
+.stChatMessage blockquote {
+    border-left: 3px solid var(--accent-orange) !important;
+    background: rgba(255,107,43,0.04) !important;
+    margin: 0.75rem 0 !important;
+    padding: 0.6rem 1rem !important;
+    border-radius: 0 10px 10px 0 !important;
+    color: var(--text-secondary) !important;
+    font-size: 0.88rem !important;
+}
+
+/* ── Horizontal rules (section separators) ─────────── */
+.stChatMessage hr {
+    border: none !important;
+    height: 1px !important;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,107,43,0.25) 50%, transparent 100%) !important;
+    margin: 1.2rem 0 !important;
+}
+
+/* ── Inline code ───────────────────────────────────── */
+.stChatMessage code:not(pre code) {
+    background: rgba(255,107,43,0.1) !important;
+    color: #ff8f5e !important;
+    padding: 0.15rem 0.45rem !important;
+    border-radius: 6px !important;
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
 }
 
 /* Streaming cursor */
@@ -1328,9 +1394,9 @@ if "graph" not in st.session_state:
 
 if "agent_state" not in st.session_state:
     user_email = _active_email
-    context_id = os.getenv("FITGEN_CONTEXT_ID", str(uuid.uuid4()))
-    restored = get_context_state(context_id) or get_latest_context_state_by_email(user_email) or {}
-    context_id = restored.get("context_id", context_id)
+    # Always start a fresh session — each login gets a clean workflow.
+    # Only the user profile is carried over from MongoDB (not old sessions).
+    context_id = str(uuid.uuid4())
 
     # Load existing user profile from MongoDB (do NOT create user doc here —
     # the user doc is only created on plan confirm in the tool handlers).
@@ -1342,17 +1408,15 @@ if "agent_state" not in st.session_state:
             user_id = str(existing_user["_id"])
             mongo_profile = UserRepository.get_merged_profile(user_email)
 
-    merged_profile = {**mongo_profile, **restored.get("user_profile", {})}
-
     st.session_state.agent_state = {
         "messages": [],
-        "user_profile": merged_profile,
-        "user_email": user_email or restored.get("user_email", ""),
+        "user_profile": mongo_profile,          # MongoDB profile only — no stale session data
+        "user_email": user_email or "",
         "user_id": user_id,
         "context_id": context_id,
         "state_id": context_id,
-        "workflow": restored.get("workflow", {}),
-        "calendar_sync_requested": restored.get("calendar_sync_requested", False),
+        "workflow": {},                          # Always fresh — no stale workflow
+        "calendar_sync_requested": False,
     }
 
 # chat_history entries: {role, content, tool_used, technique_results, base_results}
@@ -1381,6 +1445,55 @@ def _get_confirmed_workout_plan(user_id: str) -> dict | None:
     if not user_id:
         return None
     return WorkoutPlanRepository.find_latest_by_user(user_id, status="confirmed")
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_all_confirmed_diet_plans(user_id: str) -> list[dict]:
+    """Fetch all confirmed diet plans for a user (cached 30 s)."""
+    if not user_id:
+        return []
+    all_plans = DietPlanRepository.find_all_by_user(user_id, limit=20)
+    confirmed = [p for p in all_plans if p.get("status") == "confirmed"]
+    # Convert ObjectId → str so st.cache_data can serialize safely
+    for p in confirmed:
+        if "_id" in p:
+            p["_id"] = str(p["_id"])
+        if "user_id" in p:
+            p["user_id"] = str(p["user_id"])
+    return confirmed
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_all_confirmed_workout_plans(user_id: str) -> list[dict]:
+    """Fetch all confirmed workout plans for a user (cached 30 s)."""
+    if not user_id:
+        return []
+    all_plans = WorkoutPlanRepository.find_all_by_user(user_id, limit=20)
+    confirmed = [p for p in all_plans if p.get("status") == "confirmed"]
+    for p in confirmed:
+        if "_id" in p:
+            p["_id"] = str(p["_id"])
+        if "user_id" in p:
+            p["user_id"] = str(p["user_id"])
+    return confirmed
+
+
+def _plan_label(plan: dict, domain: str) -> str:
+    """Build a human-readable label for a plan in a selectbox."""
+    emoji = "🥗" if domain == "diet" else "💪"
+
+    # Prefer the stored plan name (LLM-generated on confirm)
+    name = plan.get("name", "")
+    if name:
+        return f"{emoji} {name}"
+
+    # Fallback: date + goal
+    created = plan.get("created_at")
+    date_str = created.strftime("%b %d, %Y") if created else "Unknown date"
+    profile = plan.get("profile_snapshot", {})
+    goal = profile.get("primary_goal") or profile.get("goal") or ""
+    goal_str = f" — {goal.title()}" if goal else ""
+    return f"{emoji} {date_str}{goal_str}"
 
 
 def _resolve_user_id() -> str:
@@ -1465,6 +1578,32 @@ def _copy_button(text: str, key: str) -> None:
         """,
         height=38,
     )
+
+
+def _strip_latex(text: str) -> str:
+    """Remove common LaTeX artifacts that LLMs sometimes produce.
+
+    Converts \\text{FOO} → FOO, \\textbf{FOO} → **FOO**,
+    \\frac{a}{b} → a/b, \\times → ×, and strips stray $ delimiters
+    wrapping non-math text.
+    """
+    import re as _re
+    # \textbf{...} → **...**
+    text = _re.sub(r"\\textbf\{([^}]+)\}", r"**\1**", text)
+    # \text{...} → ...
+    text = _re.sub(r"\\text\{([^}]+)\}", r"\1", text)
+    # \frac{a}{b} → a/b
+    text = _re.sub(r"\\frac\{([^}]+)\}\{([^}]+)\}", r"\1/\2", text)
+    # \times → ×
+    text = text.replace("\\times", "×")
+    # \approx → ≈
+    text = text.replace("\\approx", "≈")
+    # Strip display math blocks: \[ ... \] → content
+    text = _re.sub(r"\\\[\s*", "", text)
+    text = _re.sub(r"\s*\\\]", "", text)
+    # Strip inline math $...$ that wraps non-math text (heuristic: if content has letters)
+    text = _re.sub(r"\$([^$]{1,80})\$", r"\1", text)
+    return text
 
 
 def _stream_response(text: str, placeholder) -> None:
@@ -1593,6 +1732,119 @@ PROFILE_FORM_FIELDS: dict[str, dict] = {
     "daily_steps":            {"type": "number",    "label": "Daily Steps (approx.)", "min": 0, "max": 50000, "step": 500, "default": 5000},
     "additional_info":        {"type": "textarea",  "label": "Injuries, Physical Limitations, or Other Info (optional)"},
 }
+
+
+def _render_profile_confirm_form(domain: str, existing_profile: dict) -> dict | None:
+    """Render a Streamlit form for profile confirmation/editing.
+
+    Shows ALL fields for the domain, **pre-filled** with existing values.
+    The user can edit any field and click 'Confirm & Generate Plan'.
+    Returns the merged profile on submit, else None.
+    """
+    all_fields = DOMAIN_REQUIRED_FIELDS.get(domain, list(PROFILE_FORM_FIELDS.keys()))
+    tool_name = "diet_tool" if domain == "diet" else "workout_tool"
+
+    st.markdown(_badge(tool_name), unsafe_allow_html=True)
+    st.markdown("**Review & edit your profile, then confirm:**")
+
+    _OPTIONAL_FIELDS = {"additional_info", "favourite_meals"}
+    _show_fields = [f for f in all_fields if f in PROFILE_FORM_FIELDS]
+    _regular_fields = [f for f in _show_fields if PROFILE_FORM_FIELDS[f].get("type") != "textarea"]
+    _fullwidth_fields = [f for f in _show_fields if PROFILE_FORM_FIELDS[f].get("type") == "textarea"]
+
+    _form_key = f"profile_confirm_{domain}"
+    with st.form(_form_key, clear_on_submit=False):
+        form_values: dict = {}
+        col1, col2 = st.columns(2)
+
+        for i, field in enumerate(_regular_fields):
+            cfg = PROFILE_FORM_FIELDS.get(field)
+            if not cfg:
+                continue
+            target_col = col1 if i % 2 == 0 else col2
+            _wkey = f"confirm_{domain}_{field}"
+            _existing_val = existing_profile.get(field)
+
+            with target_col:
+                if cfg["type"] == "text":
+                    form_values[field] = st.text_input(
+                        cfg["label"],
+                        value=str(_existing_val) if _existing_val else "",
+                        key=_wkey,
+                    )
+                elif cfg["type"] == "number":
+                    _num_val = _existing_val
+                    if _num_val is not None:
+                        try:
+                            _num_val = type(cfg.get("default", cfg["min"]))(_num_val)
+                        except (ValueError, TypeError):
+                            _num_val = cfg.get("default", cfg["min"])
+                    else:
+                        _num_val = cfg.get("default", cfg["min"])
+                    # Clamp to valid range
+                    _num_val = max(cfg["min"], min(cfg["max"], _num_val))
+                    form_values[field] = st.number_input(
+                        cfg["label"],
+                        min_value=cfg["min"],
+                        max_value=cfg["max"],
+                        value=_num_val,
+                        step=cfg["step"],
+                        key=_wkey,
+                    )
+                elif cfg["type"] == "selectbox":
+                    _opts = cfg["options"]
+                    _idx = 0
+                    if _existing_val:
+                        _ev_lower = str(_existing_val).strip().lower()
+                        for j, opt in enumerate(_opts):
+                            if opt.lower() == _ev_lower:
+                                _idx = j
+                                break
+                    form_values[field] = st.selectbox(
+                        cfg["label"],
+                        options=_opts,
+                        index=_idx,
+                        key=_wkey,
+                    )
+
+        for field in _fullwidth_fields:
+            cfg = PROFILE_FORM_FIELDS.get(field)
+            if not cfg:
+                continue
+            _wkey = f"confirm_{domain}_{field}"
+            _existing_val = existing_profile.get(field)
+            form_values[field] = st.text_area(
+                cfg["label"],
+                value=str(_existing_val) if _existing_val else "",
+                height=100,
+                key=_wkey,
+            )
+
+        submitted = st.form_submit_button(
+            "✅ Confirm & Generate Plan",
+            use_container_width=True,
+            type="primary",
+        )
+
+    if submitted:
+        # Validate required fields
+        _required_fields = [f for f in _show_fields if f not in _OPTIONAL_FIELDS]
+        _required_missing = [
+            f for f in _required_fields
+            if not form_values.get(f)
+        ]
+        if _required_missing:
+            labels = [PROFILE_FORM_FIELDS[f]["label"] for f in _required_missing if f in PROFILE_FORM_FIELDS]
+            st.warning(f"Please fill in: {', '.join(labels)}")
+            return None
+        for f in _OPTIONAL_FIELDS:
+            if f in form_values and isinstance(form_values[f], str) and not form_values[f].strip():
+                form_values[f] = "none"
+        merged = dict(existing_profile)
+        merged.update(form_values)
+        return merged
+
+    return None
 
 
 def _render_profile_form(domain: str, existing_profile: dict) -> dict | None:
@@ -1835,26 +2087,18 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
-        # Check if user already has confirmed plans in DB
+        # Fetch user plans for sidebar
         _pop_user_id = _resolve_user_id()
-        _pop_has_diet = bool(_get_confirmed_diet_plan(_pop_user_id)) if _pop_user_id else False
-        _pop_has_workout = bool(_get_confirmed_workout_plan(_pop_user_id)) if _pop_user_id else False
 
         with st.popover("Menu", use_container_width=True):
             st.caption(f"Signed in as **{_display}**")
 
-            # Diet button — "Get" if plan exists, "Create" if not
-            _diet_label = "🥗 Get Diet Plan" if _pop_has_diet else "🥗 Create Diet Plan"
-            _diet_prompt = "Get my diet plan" if _pop_has_diet else "Create a diet plan"
-            if st.button(_diet_label, key="pop_diet", use_container_width=True):
-                st.session_state._quick_prompt = _diet_prompt
+            # Always show Create buttons
+            if st.button("🥗 Create Diet Plan", key="pop_create_diet", use_container_width=True):
+                st.session_state._quick_prompt = "Create a diet plan"
                 st.rerun()
-
-            # Workout button — "Get" if plan exists, "Create" if not
-            _wk_label = "💪 Get Workout Plan" if _pop_has_workout else "💪 Create Workout Plan"
-            _wk_prompt = "Get my workout plan" if _pop_has_workout else "Create a workout plan"
-            if st.button(_wk_label, key="pop_workout", use_container_width=True):
-                st.session_state._quick_prompt = _wk_prompt
+            if st.button("💪 Create Workout Plan", key="pop_create_workout", use_container_width=True):
+                st.session_state._quick_prompt = "Create a workout plan"
                 st.rerun()
 
             st.divider()
@@ -1864,6 +2108,67 @@ with st.sidebar:
                             "profile_form_pending", "graph", "water_glasses"):
                     st.session_state.pop(_k, None)
                 st.rerun()
+
+        # ── My Plans section ─────────────────────────────────────
+        _all_diet_plans = _get_all_confirmed_diet_plans(_pop_user_id) if _pop_user_id else []
+        _all_workout_plans = _get_all_confirmed_workout_plans(_pop_user_id) if _pop_user_id else []
+
+        if _all_diet_plans or _all_workout_plans:
+            st.markdown("## 📋 My Plans")
+
+            # ── Diet plans selector ──
+            if _all_diet_plans:
+                _diet_labels = [_plan_label(p, "diet") for p in _all_diet_plans]
+                _diet_idx = st.selectbox(
+                    "Diet Plans",
+                    range(len(_diet_labels)),
+                    format_func=lambda i: _diet_labels[i],
+                    key="diet_plan_selector",
+                )
+                if st.button("View Diet Plan", key="view_diet_plan", use_container_width=True):
+                    # Fetch by _id for guaranteed correctness
+                    _sel = _all_diet_plans[_diet_idx]
+                    _plan_id = _sel.get("_id")
+                    _plan_doc = DietPlanRepository.find_by_id(_plan_id) if _plan_id else _sel
+                    _plan_md = (_plan_doc or {}).get("plan_markdown", "")
+                    if _plan_md:
+                        st.session_state.chat_history.append({
+                            "role": "user",
+                            "content": f"Show me my diet plan: {_diet_labels[_diet_idx]}",
+                        })
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": _plan_md,
+                            "tool_used": "diet_tool",
+                        })
+                        st.rerun()
+
+            # ── Workout plans selector ──
+            if _all_workout_plans:
+                _wk_labels = [_plan_label(p, "workout") for p in _all_workout_plans]
+                _wk_idx = st.selectbox(
+                    "Workout Plans",
+                    range(len(_wk_labels)),
+                    format_func=lambda i: _wk_labels[i],
+                    key="workout_plan_selector",
+                )
+                if st.button("View Workout Plan", key="view_workout_plan", use_container_width=True):
+                    _sel = _all_workout_plans[_wk_idx]
+                    _plan_id = _sel.get("_id")
+                    _plan_doc = WorkoutPlanRepository.find_by_id(_plan_id) if _plan_id else _sel
+                    _plan_md = (_plan_doc or {}).get("plan_markdown", "")
+                    if _plan_md:
+                        st.session_state.chat_history.append({
+                            "role": "user",
+                            "content": f"Show me my workout plan: {_wk_labels[_wk_idx]}",
+                        })
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": _plan_md,
+                            "tool_used": "workout_tool",
+                        })
+                        st.rerun()
+
         st.divider()
 
     # ── Workflow Progress ──────────────────────────────────────
@@ -2294,6 +2599,24 @@ if _current_step == "prompted_for_user_profile_data" and st.session_state.profil
         st.session_state._pending_form_message = ", ".join(_form_parts)
         st.rerun()
 
+# ── Profile confirmation form (editable, pre-filled with existing data) ──
+
+if _current_step == "user_profile_mapped" and st.session_state.get("profile_confirm_pending"):
+    _confirm_domain = _current_workflow.get("domain", "diet")
+    _confirm_existing = st.session_state.agent_state.get("user_profile", {})
+
+    with st.chat_message("assistant"):
+        _confirm_data = _render_profile_confirm_form(_confirm_domain, _confirm_existing)
+
+    if _confirm_data is not None:
+        st.session_state.pop("profile_confirm_pending", None)
+        # Update profile with confirmed/edited values
+        st.session_state.agent_state["user_profile"].update(_confirm_data)
+        # Send "yes" (confirmed) as the user message so the tool generates the plan.
+        # The tool's Step C will extract any profile tweaks from ctx.profile.
+        st.session_state._pending_form_message = "yes"
+        st.rerun()
+
 # ── Chat input ────────────────────────────────────────────────────
 
 # Always render chat_input so it never disappears
@@ -2332,6 +2655,7 @@ if prompt:
         final_event: dict = {}
         tool_direct_reply = False
         _form_will_render = False   # suppress display when form takes over
+        _tool_structured_data: dict = {}  # macros/hydration from tool response
 
         # Rotating status phrases per stage — cycled by a background thread
         import threading, time as _time, itertools
@@ -2435,8 +2759,12 @@ if prompt:
                             _tool_state = parsed.get("state_updates", {})
                             _tool_wf = _tool_state.get("workflow", {})
                             _tool_step = _tool_wf.get("step_completed") or _tool_wf.get("stage")
-                            if _tool_step == "prompted_for_user_profile_data":
+                            if _tool_step in ("prompted_for_user_profile_data", "user_profile_mapped"):
                                 _form_will_render = True
+                            # Capture structured_data for macro chart
+                            _sd = _tool_wf.get("structured_data", {})
+                            if _sd:
+                                _tool_structured_data = _sd
 
                             assistant_message = parsed.get("assistant_message")
                             if assistant_message and assistant_message != response_content:
@@ -2497,6 +2825,7 @@ if prompt:
 
         # ── Stream the response with typewriter effect ──────────
         if response_content and not _form_will_render:
+            response_content = _strip_latex(response_content)
             _stream_response(response_content, response_placeholder)
 
         # ── Optional: base agent technique comparison ─────────────
@@ -2560,11 +2889,20 @@ if prompt:
                     )
 
                     # ── Macro Pie Chart (next to summary) ───────────────
-                    _macros = extract_macros_from_plan(response_content)
-                    _p_g = _macros.get("protein_g", 0)
-                    _c_g = _macros.get("carbs_g", 0)
-                    _f_g = _macros.get("fat_g", 0)
-                    _total = _macros.get("total_kcal", 0)
+                    # Prefer structured_data (accurate) over regex (fragile)
+                    _sd_macros = _tool_structured_data.get("macros", {})
+                    if _sd_macros and _sd_macros.get("protein_g"):
+                        _p_g = float(_sd_macros.get("protein_g", 0))
+                        _c_g = float(_sd_macros.get("carbs_g", 0))
+                        _f_g = float(_sd_macros.get("fat_g", 0))
+                        _total = float(_sd_macros.get("calories", 0))
+                    else:
+                        # Fallback to regex extraction
+                        _macros = extract_macros_from_plan(response_content)
+                        _p_g = _macros.get("protein_g", 0)
+                        _c_g = _macros.get("carbs_g", 0)
+                        _f_g = _macros.get("fat_g", 0)
+                        _total = _macros.get("total_kcal", 0)
 
                     if _p_g > 0 and _c_g > 0 and _f_g > 0:
                         st.markdown("---")
@@ -2669,8 +3007,15 @@ if prompt:
             st.session_state.profile_form_pending = True
             st.session_state._profile_form_domain = _synced_domain
             st.rerun()
+    elif _synced_step == "user_profile_mapped":
+        # Profile confirmation — show editable form instead of markdown table
+        if not st.session_state.get("profile_confirm_pending"):
+            st.session_state.profile_confirm_pending = True
+            st.session_state._profile_form_domain = _synced_domain
+            st.rerun()
     else:
         st.session_state.profile_form_pending = False
+        st.session_state.pop("profile_confirm_pending", None)
         st.session_state._profile_form_domain = ""
 
     # ── Persist to display history ────────────────────────────────

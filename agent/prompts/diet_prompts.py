@@ -200,6 +200,9 @@ Every full plan response MUST include these 8 sections in order:
 - Verify arithmetic INTERNALLY — present only the final verified plan.
 - ONE response only. No duplicates or "adjusted" versions.
 - End with disclaimer. Stop after disclaimer.
+- **NEVER use LaTeX** — no \\text{}, \\textbf{}, \\frac{}, \\times, \
+  $...$ or $$...$$ math blocks. Use plain markdown only: **bold**, \
+  `code`, × (unicode multiply sign), and standard arithmetic notation.
 
 ## Macro Compliance (CRITICAL — applies to every plan)
 The #1 credibility killer is a Macro Summary that says one thing while \

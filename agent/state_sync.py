@@ -14,10 +14,24 @@ from langchain_core.messages import ToolMessage
 
 from agent.state import AgentState
 from agent.persistence import upsert_context_state
+from agent.error_utils import handle_exception
 
 
 MERGE_KEYS = {"user_profile", "calendar_sync_requested"}
 logger = logging.getLogger("fitgen.state_sync")
+
+# Steps after which the workflow is "done" and should be clean for the
+# next operation.  The tool's confirm/get handler may have already
+# wiped ctx, but if the base agent handled the response instead, the
+# workflow was never cleaned.  This acts as a safety net.
+_COMPLETED_STEPS = frozenset({
+    "diet_confirmed",
+    "workout_confirmed",
+    "diet_plan_synced_to_google_calendar",
+    "diet_plan_synced_to_google_fit",
+    "workout_plan_synced_to_google_calendar",
+    "workout_plan_synced_to_google_fit",
+})
 
 
 def apply_tool_state_updates(state: AgentState) -> dict[str, Any]:
@@ -85,6 +99,30 @@ def apply_tool_state_updates(state: AgentState) -> dict[str, Any]:
                 or state.get("user_email")
                 or ""
             )
+
+            # ── Safety-net cleanup: don't persist stale workflows ──
+            # If the workflow reached a completed step, strip heavy
+            # payload (plan_text, structured_data, missing_fields,
+            # completed_steps) before persisting.  Keep only plan_id
+            # + domain so sync can still locate the plan in MongoDB.
+            _ew = dict(effective_workflow or {})
+            _step = _ew.get("step_completed")
+            if _step in _COMPLETED_STEPS:
+                _plan_id = _ew.get("plan_id")
+                _domain = _ew.get("domain")
+                _ew = {
+                    "step_completed": _step,
+                    "domain": _domain,
+                }
+                if _plan_id:
+                    _ew["plan_id"] = _plan_id
+                effective_workflow = _ew
+                updates["workflow"] = _ew
+                logger.info(
+                    "[state_sync] Cleaned completed workflow before persist "
+                    "(step=%s, plan_id=%s)", _step, _plan_id,
+                )
+
             upsert_context_state(
                 context_id=str(context_id),
                 user_email=effective_email,
@@ -95,6 +133,16 @@ def apply_tool_state_updates(state: AgentState) -> dict[str, Any]:
             updates.setdefault("context_id", str(context_id))
             updates.setdefault("state_id", str(context_id))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to persist context state for context_id=%s: %s", context_id, exc)
+            handle_exception(
+                exc,
+                module="state_sync",
+                context="persist context state",
+                level="WARNING",
+                extra={
+                    "context_id": str(context_id),
+                    "user_email": effective_email,
+                    "workflow_step": (effective_workflow or {}).get("step_completed"),
+                },
+            )
 
     return updates

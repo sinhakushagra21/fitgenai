@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import logging
 import pickle
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,10 @@ import numpy as np
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from agent.error_utils import handle_exception
 from agent.rag.knowledge_base import get_all_documents
+
+logger = logging.getLogger("fitgen.rag_retriever")
 
 try:
     import faiss  # type: ignore
@@ -86,18 +90,38 @@ def _build_index() -> tuple[Any, list[dict], np.ndarray | None]:
     emb_path = CACHE_DIR / f"embeddings_{cache_hash}.npy"
 
     if docs_path.exists() and index_path.exists() and faiss is not None:
-        _index = faiss.read_index(str(index_path))
-        _embeddings = None
-        with open(docs_path, "rb") as file:
-            _docs = pickle.load(file)
-        return _index, _docs, _embeddings
+        try:
+            _index = faiss.read_index(str(index_path))
+            _embeddings = None
+            with open(docs_path, "rb") as file:
+                _docs = pickle.load(file)
+            return _index, _docs, _embeddings
+        except Exception as exc:  # noqa: BLE001
+            handle_exception(
+                exc,
+                module="rag_retriever",
+                context="load cached FAISS index",
+                level="WARNING",
+                extra={"cache_hash": cache_hash},
+            )
+            # Fall through to rebuild.
 
     if docs_path.exists() and emb_path.exists() and faiss is None:
-        _index = None
-        _embeddings = np.load(emb_path)
-        with open(docs_path, "rb") as file:
-            _docs = pickle.load(file)
-        return _index, _docs, _embeddings
+        try:
+            _index = None
+            _embeddings = np.load(emb_path)
+            with open(docs_path, "rb") as file:
+                _docs = pickle.load(file)
+            return _index, _docs, _embeddings
+        except Exception as exc:  # noqa: BLE001
+            handle_exception(
+                exc,
+                module="rag_retriever",
+                context="load cached NumPy embeddings",
+                level="WARNING",
+                extra={"cache_hash": cache_hash},
+            )
+            # Fall through to rebuild.
 
     texts = [f"{doc['title']}: {doc['content']}" for doc in docs]
     embeddings = _l2_normalize(_embed_texts(texts))

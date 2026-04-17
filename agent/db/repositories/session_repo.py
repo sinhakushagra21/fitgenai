@@ -26,8 +26,17 @@ from agent.db.models import SessionDocument
 
 logger = logging.getLogger("fitgen.db.session_repo")
 
-# Configurable TTL — read from env, default 2 hours
-_SESSION_TTL_HOURS = float(os.getenv("FITGEN_SESSION_TTL_HOURS", "2"))
+# Configurable TTL — read from env, default 1 hour.
+# MongoDB's TTL index automatically deletes expired session documents.
+_SESSION_TTL_HOURS = float(os.getenv("FITGEN_SESSION_TTL_HOURS", "1"))
+
+# Steps that indicate a workflow is fully complete (terminal or confirmed+done).
+# Sessions in these states can be cleaned up aggressively.
+_COMPLETED_WORKFLOW_STEPS = frozenset({
+    "diet_confirmed", "workout_confirmed",
+    "diet_plan_synced_to_google_calendar", "diet_plan_synced_to_google_fit",
+    "workout_plan_synced_to_google_calendar", "workout_plan_synced_to_google_fit",
+})
 
 
 class SessionRepository:
@@ -110,10 +119,55 @@ class SessionRepository:
             upsert=True,
         )
 
-    # ── Delete ───────────────────────────────────────────────────
+    # ── Delete / Cleanup ──────────────────────────────────────────
 
     @classmethod
     def delete(cls, session_id: str) -> bool:
         """Delete a session by session_id.  Returns True if removed."""
         result = cls._col().delete_one({"session_id": session_id})
         return result.deleted_count > 0
+
+    @classmethod
+    def cleanup_completed(cls, *, max_age_hours: float = 0.5) -> int:
+        """Delete sessions whose workflow reached a completed/terminal state.
+
+        Removes sessions where ``workflow.step_completed`` is a terminal
+        step AND the session was last updated more than *max_age_hours*
+        ago (default 30 min).  This is a proactive cleanup that runs
+        alongside MongoDB's TTL index for faster state hygiene.
+
+        Returns the count of deleted documents.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        result = cls._col().delete_many({
+            "workflow.step_completed": {"$in": list(_COMPLETED_WORKFLOW_STEPS)},
+            "updated_at": {"$lt": cutoff},
+        })
+        if result.deleted_count:
+            logger.info(
+                "Cleaned up %d completed session(s) older than %.1fh",
+                result.deleted_count,
+                max_age_hours,
+            )
+        return result.deleted_count
+
+    @classmethod
+    def cleanup_stale(cls, *, max_age_hours: float | None = None) -> int:
+        """Delete sessions that are older than the configured TTL.
+
+        This is a manual fallback for environments where MongoDB's TTL
+        index isn't running (e.g. mongomock in tests). Uses
+        ``FITGEN_SESSION_TTL_HOURS`` by default.
+
+        Returns the count of deleted documents.
+        """
+        hours = max_age_hours if max_age_hours is not None else _SESSION_TTL_HOURS
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        result = cls._col().delete_many({"updated_at": {"$lt": cutoff}})
+        if result.deleted_count:
+            logger.info(
+                "Cleaned up %d stale session(s) older than %.1fh",
+                result.deleted_count,
+                hours,
+            )
+        return result.deleted_count

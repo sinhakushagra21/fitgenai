@@ -1,14 +1,15 @@
 """
 agent/base_agent.py
 ────────────────────
-Base agent for FITGEN.AI.
+Legacy base agent for FITGEN.AI.
 
-Responsible for understanding the user's query and routing it to the
-correct specialist tool via LangGraph's tool-calling mechanism.
+.. deprecated::
+    The graph now uses ``agent.router.router_node`` for deterministic
+    routing.  This module is kept for backward compatibility and for
+    the ``make_base_agent`` factory used by prompt-technique tests.
 
-All routing decisions are made by the LLM — no keyword matching or
-force-routing.  Dynamic workflow context is injected into the system
-prompt so the LLM has full awareness of the current conversation state.
+    **Do NOT use this module for new routing logic.**  Use
+    ``agent.router`` instead.
 
 Prompt Variables
 ────────────────
@@ -24,14 +25,14 @@ caller can swap them out without touching any other file:
 
 Usage
 ─────
-  # Use the default (few-shot) base agent node directly in a graph:
-  from agent.base_agent import base_agent
+  # Preferred: use the deterministic router (agent/router.py)
+  from agent.router import router_node
 
-  # Or build a node with a specific technique:
+  # Legacy: use the LLM-driven base agent (not used by graph.py)
   from agent.base_agent import make_base_agent
   cot_node = make_base_agent("cot")
 
-  # Or access prompts directly:
+  # Access prompts directly:
   from agent.base_agent import PROMPT_FEW_SHOT
 """
 
@@ -159,17 +160,31 @@ def _build_workflow_context(state: AgentState) -> str:
         # to say next, so it routes correctly without guessing.
         tool_name = f"{domain}_tool" if domain else "the active tool"
 
+        # Domain-switch escape: if the user explicitly asks for the
+        # OTHER domain, allow the switch regardless of workflow state.
+        _other = "workout" if domain == "diet" else "diet"
+        _other_tool = f"{_other}_tool"
+        _switch_clause = (
+            f"\n  EXCEPTION: If the user EXPLICITLY asks to create/get a "
+            f"{_other} plan (e.g. 'create a {_other} plan', 'no, make a "
+            f"{_other} plan instead'), route to {_other_tool} instead."
+        )
+
         if step_completed == "prompted_for_user_profile_data":
             lines.append(
                 f"  MANDATORY: The {domain} tool asked the user to provide "
-                f"profile data. You MUST route the user's next message to "
-                f"{tool_name}. NEVER respond directly."
+                f"profile data. Route the user's next message to "
+                f"{tool_name} unless they explicitly switch domains. "
+                f"NEVER respond directly."
+                + _switch_clause
             )
         elif step_completed == "user_profile_mapped":
             lines.append(
                 f"  MANDATORY: The {domain} tool showed the user their mapped "
-                f"profile and asked for confirmation. You MUST route to "
-                f"{tool_name}. NEVER respond directly."
+                f"profile and asked for confirmation. Route to "
+                f"{tool_name} unless they explicitly switch domains. "
+                f"NEVER respond directly."
+                + _switch_clause
             )
         elif step_completed in ("diet_plan_generated", "workout_plan_generated"):
             lines.append(
@@ -178,6 +193,7 @@ def _build_workflow_context(state: AgentState) -> str:
                 f"including 'yes', 'confirm', 'done', corrections, questions, "
                 f"and change requests. NEVER respond directly. The tool handles "
                 f"DB saves and sync offers that ONLY happen inside the tool."
+                + _switch_clause
             )
         elif step_completed in ("updated_diet_plan", "updated_workout_plan"):
             lines.append(
@@ -186,6 +202,7 @@ def _build_workflow_context(state: AgentState) -> str:
                 f"including 'yes', 'confirm', 'done', corrections, questions, "
                 f"and change requests. NEVER respond directly. The tool handles "
                 f"DB saves and sync offers that ONLY happen inside the tool."
+                + _switch_clause
             )
         elif step_completed in ("diet_confirmed", "workout_confirmed"):
             lines.append(
@@ -343,6 +360,6 @@ def make_base_agent(prompt_key: str = "zero_shot"):
 
 
 # ── Default node (few-shot) ───────────────────────────────────────
-# graph.py imports this directly; swap to make_base_agent("cot") etc.
-# to change the base agent's prompting technique globally.
+# DEPRECATED: graph.py now uses agent.router.router_node instead.
+# Kept for backward compatibility and prompt-technique tests.
 base_agent = make_base_agent("few_shot")

@@ -48,6 +48,7 @@ class PlanDocument(BaseModel):
 
     user_id: Any = None  # ObjectId — set by repo
     session_id: str = ""
+    name: str = ""  # Short human-readable title (e.g. "Lean Muscle Power Plan")
     profile_snapshot: dict[str, Any] = Field(default_factory=dict)
     plan_markdown: str = ""
     structured_data: dict[str, Any] = Field(default_factory=dict)
