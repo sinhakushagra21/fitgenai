@@ -19,14 +19,18 @@ os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 
 import json
 import logging
+import re
 import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 from time import perf_counter
 
+import markdown as _md
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import pdfkit
 import streamlit as st
 import streamlit.components.v1 as _components  # noqa: F401 — needed for st.components.v1.html
 from dotenv import load_dotenv
@@ -2754,6 +2758,121 @@ with st.sidebar:
 
 # ── Render existing chat history ──────────────────────────────────
 
+# A4 content width in pt: 595pt - 2 × ~45pt margins ≈ 505pt; round down
+# to 480pt for padding/border slack.
+_PDF_CONTENT_WIDTH_PT = 480
+
+# Percentage column widths for tables of each column count.  Column 2
+# (the "description" column — Foods, Exercise, etc.) always gets the
+# biggest share so xhtml2pdf never collapses it.
+_PDF_COL_WIDTHS = {
+    2: [35, 65],
+    3: [22, 55, 23],
+    4: [18, 44, 19, 19],
+    5: [15, 48, 13, 12, 12],
+    6: [13, 50, 10, 9, 9, 9],
+    7: [11, 47, 9, 9, 8, 8, 8],
+}
+
+_TABLE_RE = re.compile(r"<table\b[^>]*>.*?</table>", re.DOTALL | re.IGNORECASE)
+_TABLE_OPEN_RE = re.compile(r"<table\b[^>]*>", re.IGNORECASE)
+_TH_RE = re.compile(r"<th\b[^>]*>", re.IGNORECASE)
+_TD_RE = re.compile(r"<td\b[^>]*>", re.IGNORECASE)
+_FIRST_TR_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.DOTALL | re.IGNORECASE)
+
+
+def _widths_for(n_cols: int) -> list[int]:
+    if n_cols in _PDF_COL_WIDTHS:
+        return _PDF_COL_WIDTHS[n_cols]
+    if n_cols <= 1:
+        return [100]
+    rest = (100 - 13 - 50) // (n_cols - 2)
+    w = [13, 50] + [rest] * (n_cols - 2)
+    w[-1] += 100 - sum(w)
+    return w
+
+
+def _inject_table_widths(html: str) -> str:
+    """For every <table>, inject a <colgroup> with absolute pt widths
+    and set `table-layout: fixed` on the table tag.  This is the only
+    way xhtml2pdf will reliably size wide tables — without it, the
+    reportlab table engine content-guesses and collapses long-text
+    columns to ~1 character wide."""
+    def repl(m: re.Match) -> str:
+        table = m.group(0)
+        first_tr = _FIRST_TR_RE.search(table)
+        if not first_tr:
+            return table
+        first_row = first_tr.group(1)
+        n_cols = len(_TH_RE.findall(first_row)) or len(_TD_RE.findall(first_row))
+        if n_cols < 2:
+            return table
+
+        pcts = _widths_for(n_cols)
+        cols_html = "".join(
+            f'<col style="width:{p}%; width:{int(round(_PDF_CONTENT_WIDTH_PT * p / 100))}pt" '
+            f'width="{int(round(_PDF_CONTENT_WIDTH_PT * p / 100))}"/>'
+            for p in pcts
+        )
+        colgroup = f"<colgroup>{cols_html}</colgroup>"
+
+        def open_sub(_om: re.Match) -> str:
+            return (
+                f'<table width="{_PDF_CONTENT_WIDTH_PT}" '
+                f'style="table-layout:fixed;width:{_PDF_CONTENT_WIDTH_PT}pt;'
+                f'border-collapse:collapse;">'
+                + colgroup
+            )
+
+        return _TABLE_OPEN_RE.sub(open_sub, table, count=1)
+
+    return _TABLE_RE.sub(repl, html)
+
+
+_WKHTMLTOPDF_BIN = "/opt/homebrew/bin/wkhtmltopdf"
+_PDFKIT_CONFIG = (
+    pdfkit.configuration(wkhtmltopdf=_WKHTMLTOPDF_BIN)
+    if os.path.exists(_WKHTMLTOPDF_BIN)
+    else None
+)
+
+
+@st.cache_data(show_spinner=False)
+def _response_to_pdf(content: str) -> bytes:
+    """markdown → HTML → PDF bytes, rendered as shown in the response.
+    Uses wkhtmltopdf (WebKit) which renders wide tables across page
+    breaks correctly — xhtml2pdf's reportlab engine collapses long-text
+    columns on continuation pages."""
+    html_body = _md.markdown(
+        content or "",
+        extensions=["tables", "fenced_code", "sane_lists"],
+    )
+    doc = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
+        "body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;color:#222;line-height:1.45;}"
+        "h1{color:#d03050;}"
+        "h2{color:#ff6a3d;margin-top:18px;}"
+        "h3{color:#ff6a3d;}"
+        "table{border-collapse:collapse;margin:8px 0;font-size:9.5pt;width:100%;}"
+        "th,td{border:1px solid #e0e0e0;padding:6px 8px;text-align:left;vertical-align:top;"
+        "word-wrap:break-word;overflow-wrap:break-word;}"
+        "th{background:#ff6a3d;color:#fff;font-weight:bold;border-color:#ff6a3d;}"
+        "tr:nth-child(even) td{background:#fafafa;}"
+        "blockquote{background:#fff4e8;border-left:4px solid #ff6a3d;padding:6px 10px;}"
+        "</style></head><body>" + html_body + "</body></html>"
+    )
+    options = {
+        "page-size": "A4",
+        "margin-top": "16mm",
+        "margin-bottom": "16mm",
+        "margin-left": "12mm",
+        "margin-right": "12mm",
+        "encoding": "UTF-8",
+        "quiet": "",
+    }
+    return pdfkit.from_string(doc, False, options=options, configuration=_PDFKIT_CONFIG)
+
+
 for i, entry in enumerate(st.session_state.chat_history):
     _entry_avatar = AVATAR_ASSISTANT if entry["role"] == "assistant" else AVATAR_USER
     with st.chat_message(entry["role"], avatar=_entry_avatar):
@@ -2769,6 +2888,16 @@ for i, entry in enumerate(st.session_state.chat_history):
             if entry.get("content"):
                 st.markdown(entry["content"])
                 _copy_button(entry["content"], key=f"copy_reply_{i}")
+                try:
+                    st.download_button(
+                        "⬇️ Download as PDF",
+                        data=_response_to_pdf(entry["content"]),
+                        file_name=f"fitgen_response_{i}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_pdf_{i}",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         else:
             st.markdown(entry["content"])
 

@@ -29,9 +29,9 @@ from agent.shared.llm_helpers import (
     classify_intent,
     extract_profile_updates,
     extract_profile_updates_with_fallback,
-    generate_plan,
     generate_plan_name,
 )
+from agent.shared.plan_generation_loop import generate_plan_with_feedback
 from agent.shared.profile_utils import (
     build_profile_bulk_question,
     build_profile_confirmation,
@@ -567,8 +567,16 @@ def _handle_create_workout(query: str, ctx: WorkoutSessionContext) -> str:
             logger.info("[WorkoutFlow] Applying last-minute profile tweaks: %s", _tweaks)
             ctx.profile.update(_tweaks)
 
-        raw_plan = generate_plan(
-            _DOMAIN, ctx.profile, query, ctx.system_prompt
+        raw_plan, _eval_meta = generate_plan_with_feedback(
+            _DOMAIN, ctx.profile, query, ctx.system_prompt,
+        )
+        logger.info(
+            "[WorkoutFlow] plan_eval_loop: attempts=%s chosen=%s hard_pass=%s "
+            "light=%s",
+            _eval_meta.get("attempts"),
+            _eval_meta.get("chosen_index"),
+            _eval_meta.get("hard_passed"),
+            _eval_meta.get("light_score"),
         )
 
         # Extract structured data (schedule) and strip from display
@@ -817,9 +825,17 @@ def _handle_update_workout(query: str, ctx: WorkoutSessionContext) -> str:
     ctx.profile.update(cleaned)
 
     # Generate updated plan (pass existing plan for incremental changes)
-    plan_markdown = generate_plan(
+    plan_markdown, _eval_meta = generate_plan_with_feedback(
         _DOMAIN, ctx.profile, query, ctx.system_prompt,
         existing_plan=ctx.plan_text,
+    )
+    logger.info(
+        "[WorkoutFlow] plan_eval_loop (update): attempts=%s chosen=%s "
+        "hard_pass=%s light=%s",
+        _eval_meta.get("attempts"),
+        _eval_meta.get("chosen_index"),
+        _eval_meta.get("hard_passed"),
+        _eval_meta.get("light_score"),
     )
     # Enrich exercise tables with YouTube tutorial links
     plan_markdown = enrich_plan_with_videos(plan_markdown)
