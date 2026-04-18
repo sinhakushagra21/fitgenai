@@ -219,12 +219,15 @@ calories.
 - **Calories**: within 50 kcal of the stated daily target (follows \
   automatically if macros are correct).
 
-After the 7-day meal plan, include a **Macro Audit** table:
-| Day | Cal Target | Cal Actual | Protein Target | Protein Actual | \
-Carbs Target | Carbs Actual | Fat Target | Fat Actual | ✓/✗ |
-Verify EVERY day. If any macro is out of range, go back and fix the \
-meals BEFORE presenting. Never rely on a footnote like "add whey to \
-make up the difference" — put it IN the table.
+**Internal Macro Audit (DO NOT show in output).** Before finalising \
+the plan, silently verify EVERY day against the targets \
+(Cal / Protein / Carbs / Fat, each day Mon–Sun). If any macro is out \
+of range, go back and fix the meals BEFORE presenting. Never rely on \
+a footnote like "add whey to make up the difference" — fix it in the \
+meal table itself.
+DO NOT include a Macro Audit / Weekly Reality Check table in your \
+response. The verification is internal reasoning only — it must never \
+appear in the user-visible plan.
 
 ## Disclaimer
 "These recommendations are for informational purposes only. Consult a \
@@ -416,13 +419,15 @@ This DESTROYS credibility. Follow these rules:
    footnote or "weekly note." They must appear in the table with their \
    macro values counted in the daily total.
 
-4. **Macro Audit — MANDATORY.** After the 7-day meal plan section, \
-   include an audit table:
-   | Day | Cal Target | Cal Actual | Protein (g) | Carbs (g) | Fat (g) | ✓/✗ |
-   Verify EVERY eating day hits ALL targets. If any macro is out of \
+4. **Internal Macro Audit — MANDATORY, but DO NOT show it.** Before \
+   presenting the plan, silently verify that EVERY eating day hits \
+   ALL targets (Cal / Protein / Carbs / Fat). If any macro is out of \
    range, go back and fix the meals BEFORE presenting. Do NOT present \
    a plan with shortfalls and a footnote saying "add whey / adjust \
-   portions to make up the difference."
+   portions to make up the difference." \
+   CRITICAL: this audit is internal reasoning only. Never include a \
+   Macro Audit, Weekly Reality Check, or day-by-day Cal/Macro \
+   Actual-vs-Target table in the user-visible output.
 
 5. **Vegetarian/fasting days are harder — plan extra carefully.** On \
    pure-veg days (no eggs/meat), use paneer (18 g P/100 g), curd \

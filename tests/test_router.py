@@ -9,17 +9,26 @@ from unittest.mock import patch, MagicMock
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.router import (
-    _wants_domain_switch,
     _classify_intent,
     _emit_tool_call,
     router_node,
 )
 
+# The keyword-based domain-switch heuristic was replaced by an LLM-driven
+# active-turn gate (`_classify_active_turn`) that reads @tool.description
+# at runtime. The old tests below target the removed helper and are
+# skipped wholesale; gate behaviour is covered by integration tests.
+pytestmark_skip_legacy = pytest.mark.skip(
+    reason="Legacy keyword heuristic replaced by LLM active-turn gate"
+)
+_wants_domain_switch = lambda *a, **kw: False  # noqa: E731  (placeholder)
+
 
 # =====================================================================
-# _wants_domain_switch
+# _wants_domain_switch (LEGACY — skipped)
 # =====================================================================
 
+@pytestmark_skip_legacy
 class TestWantsDomainSwitch:
     """Test the keyword heuristic for domain switch detection."""
 

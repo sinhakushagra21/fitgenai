@@ -108,17 +108,24 @@ class DietSessionContext:
         sm = StateManager.from_state(state)
         wf = dict(sm.workflow or {})
 
-        # ── Auto-reset completed / cross-domain workflows ───────
-        # After confirm / sync the plan is safely in MongoDB.
+        # ── Auto-reset truly completed / cross-domain workflows ─────
+        # After a sync kicks off (`*_synced_to_*`) the plan is safely in
+        # MongoDB and OAuth hand-off has started — that's a terminal
+        # state, so we clear the in-memory workflow for the next turn.
+        #
+        # NOTE: `diet_confirmed` is NOT a reset trigger. The user is
+        # still being prompted for a sync decision, so we MUST preserve
+        # the full workflow (step_completed, domain, plan_id, intent,
+        # pending_question) so classify_intent and the handlers can
+        # route the follow-up "sync / both / skip" reply correctly.
+        #
         # Also reset if the workflow belongs to a different domain
         # (e.g. workout workflow leftover when diet tool is called).
         _step = wf.get("step_completed")
         _wf_domain = wf.get("domain")
         _is_completed = (
             _step in _TERMINAL_STEPS
-            or _step == "diet_confirmed"
-            or (_step and "confirmed" in _step)      # catches workout_confirmed too
-            or (_step and "synced" in _step)          # catches any synced step
+            or (_step and "synced" in _step)   # any *_synced_to_* step
         )
         _is_cross_domain = _wf_domain and _wf_domain != _DOMAIN
         if _is_completed or _is_cross_domain:
@@ -207,6 +214,63 @@ def _build(
     )
 
 
+def _restore_side_query_state(
+    tool_response_json: str,
+    *,
+    orig_workflow: dict[str, Any],
+    orig_profile: dict[str, Any],
+    orig_calendar: bool,
+    context_id: str,
+    user_email: str,
+) -> str:
+    """Post-process a side-query response so it doesn't clobber the
+    active workflow belonging to the OTHER domain.
+
+    * Rewrites ``state_updates.workflow`` and ``state_updates.user_profile``
+      in the returned JSON to the caller's original snapshots.
+    * Re-persists the original context-state to MongoDB (undoing whatever
+      the side-query handler wrote during _build()).
+    """
+    import json as _json
+
+    from agent.persistence import upsert_context_state
+
+    try:
+        payload = _json.loads(tool_response_json)
+    except Exception:  # noqa: BLE001
+        return tool_response_json
+
+    su = payload.get("state_updates") or {}
+    su["workflow"] = dict(orig_workflow or {})
+    su["user_profile"] = dict(orig_profile or {})
+    payload["state_updates"] = su
+    payload.pop("extra", None)
+
+    try:
+        upsert_context_state(
+            context_id=str(context_id),
+            user_email=str(user_email or ""),
+            user_profile=dict(orig_profile or {}),
+            workflow=dict(orig_workflow or {}),
+            calendar_sync_requested=bool(orig_calendar),
+        )
+        logger.info(
+            "[DietFlow] Side-query: restored caller state "
+            "(workflow_domain=%s, step=%s)",
+            (orig_workflow or {}).get("domain"),
+            (orig_workflow or {}).get("step_completed"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc, module="diet_tool",
+            context="restore side-query state",
+            level="WARNING",
+            extra={"context_id": str(context_id)},
+        )
+
+    return _json.dumps(payload)
+
+
 def _update_workflow(
     ctx: DietSessionContext,
     step_completed: str,
@@ -251,32 +315,33 @@ def _validate_extracted_profile(
 def diet_tool(
     query: str,
     state: Annotated[dict[str, Any], InjectedState],
+    side_query: bool = False,
 ) -> str:
-    """Multi-turn diet agent with create/modify/delete/sync workflow.
+    """Diet & nutrition specialist. Handles meal plans, macros, calorie \
+targets, food recommendations, allergies/preferences, snacking habits, \
+sync to Google Calendar / Google Fit, and general nutrition Q&A.
 
-    IMPORTANT: The 'query' parameter must be the user's EXACT message,
-    word-for-word. Do NOT paraphrase, expand, or add instructions.
+    Use this tool for anything food-, meal-, nutrition-, or calorie-related,
+    including creating, updating, retrieving, confirming, or deleting a
+    diet plan, and for on-topic follow-up nutrition questions.
 
+    The ``query`` MUST be the user's EXACT message, verbatim.
     Returns JSON with assistant_message and state_updates.
     """
     raw_query = _get_raw_user_query(state)
     effective_query = raw_query or query
 
-    logger.info("[DietTool] query: %s", effective_query[:120])
-    if raw_query != query:
-        logger.debug(
-            "[DietTool] Overrode LLM tool arg (len=%d) with raw user "
-            "message (len=%d)",
-            len(query),
-            len(raw_query),
-        )
+    logger.info(
+        "[DietTool] query: %s  side_query=%s",
+        effective_query[:120], side_query,
+    )
 
-    return execute(effective_query, state)
+    return execute(effective_query, state, side_query=side_query)
 
 
-def execute(query: str, state: dict[str, Any]) -> str:
+def execute(query: str, state: dict[str, Any], *, side_query: bool = False) -> str:
     """Execution entrypoint — delegates to handle_multi_turn."""
-    return handle_multi_turn(query=query, state=state)
+    return handle_multi_turn(query=query, state=state, side_query=side_query)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -287,15 +352,28 @@ def execute(query: str, state: dict[str, Any]) -> str:
 _INTENT_HANDLERS: dict[str, Any] = {}
 
 
-def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
+def handle_multi_turn(
+    *,
+    query: str,
+    state: dict[str, Any],
+    side_query: bool = False,
+) -> str:
     """Orchestrate the diet multi-turn workflow.
 
-    Steps:
-      1. Load session via StateManager
-      2. Extract session context (profile, workflow, plan_text, etc.)
-      3. Classify intent via LLM → DietIntent
-      4. Dispatch to the matching intent handler
+    When ``side_query=True`` the tool is being called from the OTHER
+    domain's active workflow for a one-shot nutrition question. In that
+    case we:
+      * force intent = ``general_diet_query`` (no classifier call),
+      * after the handler runs, RESTORE the caller's original workflow
+        and profile in both the returned ``state_updates`` AND the
+        persisted context-state document — so the active workout flow
+        is not corrupted by our intermediate writes.
     """
+    # Snapshot the true caller state BEFORE from_state rewrites anything.
+    _orig_workflow = dict(state.get("workflow") or {}) if side_query else None
+    _orig_profile = dict(state.get("user_profile") or {}) if side_query else None
+    _orig_calendar = bool(state.get("calendar_sync_requested", False))
+
     # Step 1-2: Load session context
     ctx = DietSessionContext.from_state(state)
 
@@ -307,16 +385,44 @@ def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
         len(ctx.plan_text),
     )
 
+    # Side-query fast-path: skip classification, force general_diet_query,
+    # run the handler, then RESTORE the caller's original workflow/profile
+    # so the cross-domain active workflow is not clobbered.
+    if side_query:
+        logger.info("[DietFlow] Side-query mode — forcing general_diet_query")
+        try:
+            result = _handle_general_diet_query(query, ctx)
+        except Exception as exc:  # noqa: BLE001
+            handle_exception(
+                exc, module="diet_tool", context="handler:general_diet_query (side)",
+                extra={"session_id": ctx.session_id},
+            )
+            result = _build(
+                "I had trouble answering that. Please try again.", ctx,
+            )
+        return _restore_side_query_state(
+            result,
+            orig_workflow=_orig_workflow or {},
+            orig_profile=_orig_profile or {},
+            orig_calendar=_orig_calendar,
+            context_id=ctx.session_id,
+            user_email=ctx.user_email,
+        )
+
     # Step 3: Classify intent via LLM (always, no shortcuts)
     #
-    # has_plan is True ONLY when a draft plan is waiting for
-    # review/update/confirm.  After confirm or sync the plan lives
-    # in MongoDB — it's no longer a draft the user can "update".
-    # NOTE: from_state() already auto-resets confirmed/terminal
-    # workflows, so ctx is born clean in those cases.
+    # has_plan tells the classifier whether *any* plan exists for this
+    # user — draft (in session) OR confirmed (in MongoDB). This is what
+    # RULE 4 of the classifier prompt checks to decide if sync requests
+    # are legal.
+    #   • Draft: ctx.plan_text set AND step ∈ _DRAFT_PLAN_STEPS
+    #   • Confirmed: step == "diet_confirmed" (plan lives in Mongo;
+    #     ctx.plan_text is cleared because sync handlers re-resolve via
+    #     plan_id). Without this, "sync to calendar" at step
+    #     `diet_confirmed` would be mis-classified as general_diet_query.
     _has_draft_plan = (
-        bool(ctx.plan_text)
-        and ctx.step_completed in _DRAFT_PLAN_STEPS
+        (bool(ctx.plan_text) and ctx.step_completed in _DRAFT_PLAN_STEPS)
+        or ctx.step_completed == "diet_confirmed"
     )
     try:
         classification = classify_intent(
@@ -613,14 +719,14 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
             "Set FITGEN_USER_EMAIL in .env to enable persistence."
         )
 
-    # ── Clean workflow — plan is in MongoDB, no need to carry it ──
-    # Keep only plan_id (for sync) and domain. Sync handlers use
-    # _resolve_plan_text() to fetch from MongoDB by plan_id.
-    ctx.workflow = {}
+    # ── Preserve workflow context for the sync follow-up ──────────────
+    # We intentionally KEEP `workflow.domain="diet"` and
+    # `step_completed="diet_confirmed"` so the router can deterministically
+    # route the user's next reply ("calendar" / "both" / "skip" / …) to
+    # this tool. Plan markdown + structured_data are cleared because the
+    # plan now lives in MongoDB; sync handlers pull it via _resolve_plan_text.
     ctx.plan_text = ""
-    ctx.step_completed = None
     ctx.completed_steps = []
-    ctx.pending_question = None
 
     _update_workflow(
         ctx,
@@ -644,6 +750,114 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
         "Or just say **done** if you're all set!",
         ctx,
     )
+
+
+def _wipe_sync_workflow(ctx: DietSessionContext) -> None:
+    """Clear all workflow state after sync decision is terminal.
+
+    Called from the three terminal branches:
+      • sync_diet_to_google_calendar  (OAuth hand-off started)
+      • sync_diet_to_google_fit       (OAuth hand-off started)
+      • skip_sync_diet                (user declined sync)
+
+    After this runs the next user message will go through the router's
+    LLM classifier as a fresh conversation — so domain switches and new
+    requests work cleanly.
+    """
+    ctx.workflow = {}
+    ctx.plan_text = ""
+    ctx.step_completed = None
+    ctx.completed_steps = []
+    ctx.pending_question = None
+
+
+def _handle_skip_sync_diet(query: str, ctx: DietSessionContext) -> str:
+    """User declined sync after confirming the plan — wipe workflow."""
+    _wipe_sync_workflow(ctx)
+    return _build(
+        "All set! Your diet plan is confirmed. "
+        "Let me know whenever you need anything else. 💪",
+        ctx,
+    )
+
+
+def _handle_sync_to_both(query: str, ctx: DietSessionContext) -> str:
+    """Sync the plan to BOTH Google Calendar and Google Fit.
+
+    We chain the two existing handlers. Each handler kicks off its own
+    OAuth hand-off and marks the plan in MongoDB. The final response
+    combines both CTAs for the sidebar.
+    """
+    _plan = _resolve_plan_text(ctx)
+    if not _plan:
+        return _build(
+            "You don't have a diet plan to sync yet. Create one first!",
+            ctx,
+        )
+
+    try:
+        from agent.tools.calendar_integration import (
+            get_authorization_url,
+            save_oauth_context,
+        )
+
+        auth_url, oauth_state = get_authorization_url()
+
+        # One OAuth session authorises both scopes — save context with
+        # sync_target="both" so the post-OAuth handler performs both syncs.
+        save_oauth_context(
+            plan_text=_plan,
+            domain=_DOMAIN,
+            profile=ctx.profile,
+            sync_target="both",
+        )
+
+        _plan_id = ctx.workflow.get("plan_id")
+        if _plan_id:
+            DietPlanRepository.update_plan(
+                _plan_id, calendar_synced=True, fit_synced=True,
+            )
+
+        _update_workflow(
+            ctx,
+            step_completed="diet_plan_synced_to_google_calendar",
+            step_name="sync_both_started",
+            intent="sync_diet_to_both",
+            oauth_state=oauth_state,
+            pending_question="Click the button in the sidebar to complete the sync.",
+        )
+
+        # Wipe AFTER _update_workflow has captured the terminal step —
+        # the state_sync layer reads from ctx.workflow on this turn.
+        _wipe_sync_workflow(ctx)
+
+        return _build(
+            "🔗 **Ready to connect Google — syncing to both Calendar & Fit!**\n\n"
+            "Click the **\"📅 Connect Google Calendar\"** button in the sidebar "
+            "to authorise. One sign-in covers both Google Calendar and Google "
+            "Fit.\n\n"
+            f"Or open this link directly: [Authorize FITGEN.AI]({auth_url})",
+            ctx,
+            extra={
+                "calendar_sync_requested": True,
+                "google_fit_sync_requested": True,
+                "calendar_auth_url": auth_url,
+            },
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="diet_tool",
+            context="sync to both (calendar + fit)",
+            extra={"session_id": ctx.session_id},
+        )
+        return _build(
+            "I'd love to sync to Google Calendar and Google Fit, but the "
+            "integration is not configured. Please check GOOGLE_CLIENT_ID "
+            "and GOOGLE_CLIENT_SECRET in your .env file.",
+            ctx,
+        )
 
 
 def _handle_update_diet(query: str, ctx: DietSessionContext) -> str:
@@ -857,6 +1071,10 @@ def _handle_sync_to_google_calendar(
             pending_question="Click the button in the sidebar to complete the sync.",
         )
 
+        # Terminal branch — wipe residual workflow so the next user message
+        # starts fresh at the router's LLM classifier.
+        _wipe_sync_workflow(ctx)
+
         return _build(
             "🔗 **Ready to connect Google Calendar!**\n\n"
             "Click the **\"📅 Connect Google Calendar\"** button in the "
@@ -921,6 +1139,9 @@ def _handle_sync_to_google_fit(
             pending_question="Click the button in the sidebar to complete the sync.",
         )
 
+        # Terminal branch — wipe residual workflow.
+        _wipe_sync_workflow(ctx)
+
         return _build(
             "💪 **Ready to connect Google Fit!**\n\n"
             "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
@@ -981,5 +1202,7 @@ _INTENT_HANDLERS.update({
     "confirm_diet": _handle_confirm_diet,
     "sync_diet_to_google_calendar": _handle_sync_to_google_calendar,
     "sync_diet_to_google_fit": _handle_sync_to_google_fit,
+    "sync_diet_to_both": _handle_sync_to_both,
+    "skip_sync_diet": _handle_skip_sync_diet,
     "general_diet_query": _handle_general_diet_query,
 })

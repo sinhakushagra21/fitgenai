@@ -26,6 +26,8 @@ DietIntent = Literal[
     "confirm_diet",
     "sync_diet_to_google_calendar",
     "sync_diet_to_google_fit",
+    "sync_diet_to_both",
+    "skip_sync_diet",
     "general_diet_query",
 ]
 
@@ -37,6 +39,8 @@ WorkoutIntent = Literal[
     "confirm_workout",
     "sync_workout_to_google_calendar",
     "sync_workout_to_google_fit",
+    "sync_workout_to_both",
+    "skip_sync_workout",
     "general_workout_query",
 ]
 

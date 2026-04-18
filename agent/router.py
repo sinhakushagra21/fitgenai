@@ -6,22 +6,23 @@ Deterministic router for the FITGEN.AI LangGraph graph.
 Replaces the LLM-driven routing in base_agent.py with a programmatic
 approach that is faster, cheaper, and more reliable:
 
-  1. Active workflow → route to active domain's tool  (deterministic)
-  2. Domain switch detected → route to other tool     (keyword heuristic)
-  3. No active workflow → lightweight LLM classifier  (focused call)
-  4. "direct" intent → LLM generates a response       (greetings / OOS)
+  1. Active workflow → LLM "active-turn gate" picks one of:
+        stay | side_diet | side_workout | switch | direct
+     — using the @tool descriptions (loaded at import) as context.
+  2. "stay"              → dispatch to active domain's tool.
+  3. "side_diet/workout" → answer out-of-band in the OTHER domain
+                           WITHOUT mutating the active workflow.
+  4. "switch"            → fall through to the fresh-conversation classifier.
+  5. "direct"            → LLM generates a direct response (greetings / OOS).
+  6. No active workflow  → lightweight LLM classifier picks a tool.
 
-Why this is better than the old base_agent routing:
-  - Active workflows are ALWAYS routed to the correct tool — no more
-    "MANDATORY" prompt hints that the LLM sometimes ignores.
-  - Domain switches are detected by a fast keyword heuristic, not by
-    hoping the LLM notices an "EXCEPTION" clause buried in the prompt.
-  - The LLM classifier is a FOCUSED classification call (one system
-    message + one user message), not a response-generating call that
-    also happens to pick a tool.  Much more reliable.
-  - Direct responses use a minimal prompt (identity + scope), not the
-    massive base_agent prompt with routing rules, workflow context, and
-    safety sections that confused the LLM.
+Why a gate instead of a keyword heuristic:
+  - Users ask about "traps", "biceps", "creatine", "RDL" etc. mid-flow.
+    No hand-maintained keyword list can keep up; the LLM gate reads the
+    tool descriptions and the active-workflow context and decides
+    naturally.
+  - Side queries are answered out-of-band so an unconfirmed plan draft
+    is not destroyed by a stray exercise question.
 
 Graph topology
 ──────────────
@@ -34,7 +35,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import re
+from typing import Any
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -48,10 +49,43 @@ from agent.tracing import get_langsmith_config, log_event
 
 logger = logging.getLogger("fitgen.router")
 
+# ── Tool description cache (loaded once at import) ───────────────────
+# We read `.description` off each @tool-decorated BaseTool so the LLM
+# gate can reason over live tool docs instead of hand-maintained blurbs.
+# This cache is built on app import and never changes at runtime.
+try:
+    from agent.tools import diet_tool as _diet_tool_obj
+    from agent.tools import workout_tool as _workout_tool_obj
+    from agent.tools import rag_query_tool as _rag_tool_obj
+
+    _TOOL_DESCRIPTIONS: dict[str, str] = {
+        "diet_tool": (getattr(_diet_tool_obj, "description", "") or "").strip(),
+        "workout_tool": (getattr(_workout_tool_obj, "description", "") or "").strip(),
+        "rag_query_tool": (getattr(_rag_tool_obj, "description", "") or "").strip(),
+    }
+    logger.info(
+        "[Router] Loaded tool descriptions: %s",
+        {k: len(v) for k, v in _TOOL_DESCRIPTIONS.items()},
+    )
+except Exception as _exc:  # noqa: BLE001
+    logger.warning("[Router] Could not load tool descriptions: %s", _exc)
+    _TOOL_DESCRIPTIONS = {
+        "diet_tool": "Diet, meal plans, nutrition, foods, macros, calories.",
+        "workout_tool": "Workout and exercise plans, training schedules, reps, sets, body parts, lifts.",
+        "rag_query_tool": "General evidence-based fitness/nutrition knowledge questions.",
+    }
+
 # ── Terminal steps (workflow is "done") ──────────────────────────────
+# NOTE: `diet_confirmed` / `workout_confirmed` are NOT terminal — the user
+# is still being prompted for a sync decision (calendar / fit / both /
+# skip). Keeping the workflow active while `step_completed` is
+# `*_confirmed` lets the router deterministically dispatch the follow-up
+# reply ("yes", "both", "skip", etc.) to the correct domain tool. Once
+# the user actually completes (or declines) sync, the tool transitions
+# to one of the terminal steps below — OR wipes the workflow for a
+# graceful skip — so the next message goes through the fresh-conversation
+# LLM classifier path.
 _TERMINAL_STEPS = frozenset({
-    "diet_confirmed",
-    "workout_confirmed",
     "diet_plan_synced_to_google_calendar",
     "diet_plan_synced_to_google_fit",
     "workout_plan_synced_to_google_calendar",
@@ -66,22 +100,108 @@ _VALID_ROUTES = frozenset({
     "direct",
 })
 
-# ── Domain keyword sets for switch detection ─────────────────────────
-_DIET_KEYWORDS = frozenset({
-    "diet", "meal", "nutrition", "food", "eat", "eating",
-    "calorie", "macro", "macros",
-})
-_WORKOUT_KEYWORDS = frozenset({
-    "workout", "exercise", "training", "gym", "fitness",
-    "lifting", "cardio", "strength",
-})
-_PLAN_KEYWORDS = frozenset({
-    "plan", "program", "programme", "routine", "chart", "schedule",
-})
-_CREATE_KEYWORDS = frozenset({
-    "create", "make", "build", "generate", "design", "start", "new",
-    "give", "get", "show", "fetch",
-})
+# ── Active-turn gate (LLM) ───────────────────────────────────────────
+# When a workflow is in progress, this gate decides per turn whether to:
+#   - stay   : continue the active workflow (profile answers, confirms, syncs)
+#   - side_diet / side_workout : answer a one-shot question in the OTHER
+#     domain WITHOUT touching the active workflow
+#   - switch : user wants to abandon the active flow and start fresh
+#   - direct : greeting / chitchat / out-of-scope
+_ACTIVE_TURN_VALID = frozenset(
+    {"stay", "side_diet", "side_workout", "switch", "direct"}
+)
+
+_ACTIVE_TURN_GATE_SYSTEM = """\
+You are a routing gate for FITGEN.AI, a multi-turn fitness coaching assistant.
+
+A {domain} workflow is already in progress. The user's last completed step is \
+"{step}". Your job is to decide how to handle the NEXT user turn.
+
+Here are the specialist tools available, with their own descriptions:
+
+[diet_tool]
+{diet_desc}
+
+[workout_tool]
+{workout_desc}
+
+[rag_query_tool]
+{rag_desc}
+
+Choose EXACTLY ONE label for the user turn:
+
+- "stay"         — The turn belongs to the active {domain} workflow. Use for \
+profile answers (name, age, weight, goals…), confirmations ("yes", "confirm", \
+"looks good"), sync replies ("calendar", "fit", "both", "skip", "done"), \
+edits/updates to the {domain} plan, or on-topic {domain} follow-up questions.
+- "side_diet"    — One-off nutrition / food / diet question that is NOT about \
+creating or modifying a plan. Answer out-of-band without disturbing the active \
+workflow.
+- "side_workout" — One-off exercise / body-part / training question that is NOT \
+about creating or modifying a plan. Answer out-of-band without disturbing the \
+active workflow.
+- "switch"       — The user wants to ABANDON the active {domain} workflow and \
+start a new plan in the other domain, delete the current plan, or explicitly \
+asks to switch ("forget that", "instead make me a workout plan", "create a \
+diet plan now").
+- "direct"       — Greeting, chitchat, meta-question about the assistant, or \
+fully out-of-scope (politics, coding, etc.).
+
+Important rules:
+- Short utterances like "yes", "no", "ok", "both", "skip", numbers, names, \
+single food words (e.g. "chicken") during profile intake → ALWAYS "stay".
+- Questions about body parts, lifts, reps, sets, form, cardio → "side_workout" \
+(unless the active domain is already workout, in which case "stay").
+- Questions about nutrients, meals, recipes, calories, allergies → "side_diet" \
+(unless the active domain is already diet, in which case "stay").
+- Only pick "switch" if the user clearly wants to START A NEW PLAN in the \
+other domain. A side question is NOT a switch.
+
+Respond with ONE lowercase label and nothing else."""
+
+
+def _classify_active_turn(query: str, domain: str, step: str | None) -> str:
+    """Ask the fast LLM what to do with this turn during an active workflow.
+
+    Returns one of: "stay", "side_diet", "side_workout", "switch", "direct".
+    Falls back to "stay" on error (safest: don't disrupt the workflow).
+    """
+    try:
+        llm = ChatOpenAI(model=FAST_MODEL, temperature=0, max_tokens=8)
+        system = _ACTIVE_TURN_GATE_SYSTEM.format(
+            domain=domain,
+            step=step or "(none)",
+            diet_desc=_TOOL_DESCRIPTIONS.get("diet_tool", ""),
+            workout_desc=_TOOL_DESCRIPTIONS.get("workout_tool", ""),
+            rag_desc=_TOOL_DESCRIPTIONS.get("rag_query_tool", ""),
+        )
+        resp = safe_llm_call(
+            llm,
+            [SystemMessage(content=system), HumanMessage(content=query)],
+            config=get_langsmith_config(
+                "Router Active-Turn Gate",
+                tags=["router", "gate", domain],
+            ),
+        )
+        label = resp.content.strip().lower().strip("\"'`.")
+        # Tolerate minor formatting noise
+        label = label.split()[0] if label else ""
+        if label not in _ACTIVE_TURN_VALID:
+            logger.warning(
+                "Active-turn gate returned '%s' (invalid) — defaulting to 'stay'",
+                label,
+            )
+            return "stay"
+        return label
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="router",
+            context="active-turn gate",
+            level="WARNING",
+            extra={"query_preview": query[:120], "domain": domain, "step": step},
+        )
+        return "stay"
 
 # ── LLM classifier system prompt ────────────────────────────────────
 _CLASSIFIER_SYSTEM = """\
@@ -146,46 +266,6 @@ def _last_human_text(messages: list) -> str:
     return ""
 
 
-def _wants_domain_switch(query: str, current_domain: str) -> bool:
-    """Detect if the user explicitly wants to switch to the other domain.
-
-    Uses a fast keyword heuristic.  A switch is detected when the user's
-    message mentions the *other* domain's keywords AND contains either:
-      - a plan keyword + a creation keyword, OR
-      - a switch phrase ("instead", "rather", "switch to").
-
-    This correctly ignores profile field values like "exercise_frequency"
-    or "diet_preference" that mention the other domain's words without
-    implying a switch.
-    """
-    q = query.lower()
-    words = set(re.findall(r"\w+", q))
-
-    other = "workout" if current_domain == "diet" else "diet"
-    other_kw = _WORKOUT_KEYWORDS if other == "workout" else _DIET_KEYWORDS
-
-    # Must mention the other domain at all
-    if not (words & other_kw):
-        return False
-
-    has_plan = bool(words & _PLAN_KEYWORDS)
-    has_create = bool(words & _CREATE_KEYWORDS)
-    has_switch_phrase = any(
-        p in q
-        for p in ("instead", "rather", "switch to", "switch from")
-    )
-
-    # Explicit "no, <action>" prefix — strong switch signal
-    has_no_prefix = bool(re.match(r"^\s*no[\s,!.]+", q))
-
-    return (
-        (has_plan and has_create)
-        or (has_plan and has_switch_phrase)
-        or (has_switch_phrase)
-        or (has_no_prefix and (has_plan or has_create))
-    )
-
-
 def _classify_intent(query: str) -> str:
     """Use a focused fast-LLM call to classify user intent.
 
@@ -231,13 +311,26 @@ def _classify_intent(query: str) -> str:
         return "direct"
 
 
-def _emit_tool_call(tool_name: str, query: str) -> dict:
+def _emit_tool_call(
+    tool_name: str,
+    query: str,
+    *,
+    side_query: bool = False,
+) -> dict:
     """Create an AIMessage with a programmatic tool_call.
 
     LangGraph's ``tools_condition`` will see the tool_calls and route
     to the ToolNode, which injects ``InjectedState`` automatically.
+
+    When ``side_query=True``, the tool is instructed to answer the turn
+    as ``general_{domain}_query`` WITHOUT mutating the active workflow
+    or user_profile — used for out-of-domain probes during an active
+    workflow in the OTHER domain.
     """
     call_id = f"call_{tool_name}_{uuid4().hex[:8]}"
+    args: dict[str, Any] = {"query": query}
+    if side_query:
+        args["side_query"] = True
     return {
         "messages": [
             AIMessage(
@@ -246,7 +339,7 @@ def _emit_tool_call(tool_name: str, query: str) -> dict:
                     {
                         "id": call_id,
                         "name": tool_name,
-                        "args": {"query": query},
+                        "args": args,
                     }
                 ],
             )
@@ -350,31 +443,54 @@ def router_node(state: AgentState) -> dict:
     )
 
     if has_active_workflow:
-        if _wants_domain_switch(user_query, current_domain=domain):
-            other = "workout" if domain == "diet" else "diet"
-            target = f"{other}_tool"
+        gate = _classify_active_turn(user_query, domain=domain, step=step)
+        logger.info(
+            "[Router] Active-turn gate: %s (domain=%s, step=%s)",
+            gate, domain, step,
+        )
+        log_event(
+            "router.active_turn_gate",
+            module="router",
+            gate=gate,
+            domain=domain,
+            step=step,
+            query_preview=user_query[:80],
+        )
+
+        if gate == "stay":
+            return _emit_tool_call(f"{domain}_tool", user_query)
+
+        if gate == "side_diet":
+            # If active domain IS diet, "side_diet" is just "stay".
+            if domain == "diet":
+                return _emit_tool_call("diet_tool", user_query)
+            # Otherwise dispatch to diet_tool with side_query=True so it
+            # forces general_diet_query intent AND preserves the active
+            # workout workflow/profile (no clobber).
+            return _emit_tool_call(
+                "diet_tool", user_query, side_query=True,
+            )
+
+        if gate == "side_workout":
+            if domain == "workout":
+                return _emit_tool_call("workout_tool", user_query)
+            return _emit_tool_call(
+                "workout_tool", user_query, side_query=True,
+            )
+
+        if gate == "switch":
+            # Fall through to the fresh-conversation classifier below so
+            # the user can start a new plan / knowledge query / etc.
+            # The target tool's own from_state() will reset the stale
+            # cross-domain workflow.
             logger.info(
-                "Domain switch detected: %s -> %s", domain, other,
+                "[Router] Switch requested — falling through to fresh classifier"
             )
-            log_event(
-                "router.domain_switch",
-                module="router",
-                from_domain=domain,
-                to_domain=other,
-                query_preview=user_query[:80],
-            )
-        else:
-            target = f"{domain}_tool"
-            logger.info(
-                "Active workflow -> %s (step: %s)", target, step,
-            )
-            log_event(
-                "router.active_workflow",
-                module="router",
-                target=target,
-                step=step,
-            )
-        return _emit_tool_call(target, user_query)
+
+        elif gate == "direct":
+            return _generate_direct_response(state)
+
+        # gate == "switch" falls through to the fresh-classifier path
 
     # ── 3. No active workflow → LLM classifier ─────────────────────
     route = _classify_intent(user_query)

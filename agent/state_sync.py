@@ -24,9 +24,13 @@ logger = logging.getLogger("fitgen.state_sync")
 # next operation.  The tool's confirm/get handler may have already
 # wiped ctx, but if the base agent handled the response instead, the
 # workflow was never cleaned.  This acts as a safety net.
+#
+# IMPORTANT: This must stay in sync with `router._TERMINAL_STEPS`.
+# `*_confirmed` is NOT terminal — the user is still being prompted for
+# a sync decision, so we must preserve the full workflow (domain,
+# step_completed, plan_id, pending_question, intent) so the router can
+# deterministically dispatch the follow-up reply to the right tool.
 _COMPLETED_STEPS = frozenset({
-    "diet_confirmed",
-    "workout_confirmed",
     "diet_plan_synced_to_google_calendar",
     "diet_plan_synced_to_google_fit",
     "workout_plan_synced_to_google_calendar",

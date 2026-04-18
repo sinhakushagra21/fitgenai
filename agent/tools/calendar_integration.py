@@ -11,6 +11,17 @@ Provides:
 
 from __future__ import annotations
 
+# ── oauthlib scope-relaxation (MUST be set before importing oauthlib) ─
+# When the user is already signed in with Google, the OAuth response
+# includes their login scopes (openid / email / profile) in addition to
+# the scopes we requested. oauthlib's strict check raises a Warning on
+# any scope mismatch, which breaks the token exchange. Google's own
+# docs recommend relaxing this check; we also request those scopes
+# explicitly below so they match most of the time anyway.
+import os as _os  # noqa: E402
+_os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+_os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+
 import json
 import logging
 import os
@@ -30,7 +41,14 @@ logger = logging.getLogger("fitgen.calendar")
 from agent.config import FAST_MODEL
 
 _LLM_MODEL = FAST_MODEL
+# NOTE: openid + userinfo.email + userinfo.profile are included so the
+# scopes returned by Google (which always includes these when the user
+# is signed in) match what we asked for. Without this, oauthlib raises
+# "Scope has changed" on token exchange.
 _SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/fitness.nutrition.write",
     "https://www.googleapis.com/auth/fitness.activity.write",
@@ -124,12 +142,16 @@ def get_authorization_url() -> tuple[str, str]:
         redirect_uri=_REDIRECT_URI,
         autogenerate_code_verifier=False,  # ← disable PKCE
     )
+    # UX: don't force the consent screen on every click. If the user has
+    # already granted these scopes, Google will SSO-approve silently; if
+    # not, they'll see the consent screen once. We rely on the immediate
+    # token exchange (no long-lived refresh_token needed) so omitting
+    # `prompt="consent"` is safe.
     authorization_url, state = flow.authorization_url(
-        access_type="offline",
+        access_type="online",
         include_granted_scopes="true",
-        prompt="consent",
     )
-    logger.info("[Calendar] Generated OAuth URL (PKCE disabled)")
+    logger.info("[Calendar] Generated OAuth URL (PKCE disabled, SSO-friendly)")
     return authorization_url, state
 
 

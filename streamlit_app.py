@@ -91,7 +91,11 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Custom CSS: Dark fitness theme ────────────────────────────────
+# ── Chat avatars (custom emojis, not Streamlit's default SVG icons) ──
+AVATAR_USER = "🧑"
+AVATAR_ASSISTANT = "🔥"
+
+# ── Custom CSS: original orange-theme + avatar/status upgrades ──
 st.markdown("""
 <style>
 /* ── Import Google Fonts ────────────────────────────── */
@@ -742,6 +746,203 @@ hr {
     margin-top: 0.3rem !important;
     margin-bottom: 0.2rem !important;
 }
+
+/* ═══════════════════════════════════════════════════ */
+/* Chat input — kill baseweb tint, orange focus ring   */
+/* ═══════════════════════════════════════════════════ */
+[data-testid="stChatInput"],
+[data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] > div > div,
+.stChatInput, .stChatInput > div, .stChatInput > div > div,
+div[data-baseweb="textarea"],
+div[data-baseweb="base-input"] {
+    background: var(--bg-card) !important;
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-subtle) !important;
+}
+[data-testid="stChatInput"] {
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: 14px !important;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.03), rgba(0,0,0,0.35) 0px 4px 18px !important;
+    padding: 2px !important;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+[data-testid="stChatInput"]:focus-within {
+    border-color: var(--accent-orange) !important;
+    box-shadow: 0 0 0 1px var(--accent-orange), var(--accent-orange-glow) 0px 4px 20px !important;
+}
+[data-testid="stChatInput"] textarea,
+.stChatInput textarea {
+    background: transparent !important;
+    background-color: transparent !important;
+    color: var(--text-primary) !important;
+    caret-color: var(--accent-orange) !important;
+    font-size: 0.95rem !important;
+    line-height: 1.5 !important;
+}
+[data-testid="stChatInput"] textarea::placeholder,
+.stChatInput textarea::placeholder {
+    color: var(--text-muted) !important;
+    font-style: normal !important;
+}
+[data-testid="stChatInput"] button {
+    background: var(--bg-card-hover) !important;
+    color: var(--text-primary) !important;
+    border: none !important;
+    border-radius: 10px !important;
+    box-shadow: 0 0 0 1px var(--border-subtle) !important;
+    transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease !important;
+}
+[data-testid="stChatInput"] button:hover:not(:disabled) {
+    background: var(--accent-orange) !important;
+    box-shadow: 0 0 0 1px var(--accent-orange), var(--accent-orange-glow) 0 4px 14px !important;
+    transform: translateY(-1px) !important;
+}
+[data-testid="stChatInput"] button:hover:not(:disabled) svg {
+    color: #fff !important;
+    fill: #fff !important;
+}
+[data-testid="stChatInput"] button svg {
+    color: var(--text-primary) !important;
+    fill: var(--text-primary) !important;
+}
+
+/* ═══════════════════════════════════════════════════ */
+/* Chat avatars — warm emoji tokens, animated          */
+/* ═══════════════════════════════════════════════════ */
+@keyframes avatarBreathe {
+    0%, 100% { transform: scale(1);    filter: brightness(1.00) saturate(1.00); }
+    50%      { transform: scale(1.10); filter: brightness(1.18) saturate(1.18); }
+}
+@keyframes avatarAssistantBob {
+    0%, 100% { transform: translateY(0)    rotate(0deg); }
+    25%      { transform: translateY(-2px) rotate(-4deg); }
+    75%      { transform: translateY(-1px) rotate(4deg); }
+}
+@keyframes avatarUserSway {
+    0%, 100% { transform: rotate(0deg); }
+    50%      { transform: rotate(3deg); }
+}
+@keyframes avatarFlameRing {
+    0%, 100% { box-shadow: 0 0 0 1px var(--accent-orange), 0 0 0 3px rgba(255,107,43,0.25), 0 0 12px rgba(255,107,43,0.30); }
+    50%      { box-shadow: 0 0 0 1px var(--accent-red),    0 0 0 4px rgba(230,57,70,0.18),  0 0 18px rgba(230,57,70,0.45); }
+}
+@keyframes avatarUserRing {
+    0%, 100% { box-shadow: 0 0 0 1px var(--border-subtle); }
+    50%      { box-shadow: 0 0 0 1px #444, 0 0 0 3px rgba(160,160,160,0.15); }
+}
+
+.stChatMessage [data-testid*="hatAvatar"],
+.stChatMessage [data-testid*="hatMessageAvatar"],
+[data-testid="stChatMessageAvatarUser"],
+[data-testid="stChatMessageAvatarAssistant"],
+[data-testid="chatAvatarIcon-user"],
+[data-testid="chatAvatarIcon-assistant"] {
+    border-radius: 50% !important;
+    background: var(--bg-card-hover) !important;
+    width: 40px !important;
+    height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 1.25rem !important;
+    line-height: 1 !important;
+    transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+    overflow: visible !important;
+}
+
+.stChatMessage [data-testid="stChatMessageAvatarAssistant"],
+.stChatMessage [data-testid="chatAvatarIcon-assistant"] {
+    background: radial-gradient(circle at 30% 30%, rgba(255,107,43,0.18) 0%, var(--bg-card-hover) 75%) !important;
+    animation: avatarFlameRing 2.6s ease-in-out infinite !important;
+}
+
+.stChatMessage [data-testid="stChatMessageAvatarUser"],
+.stChatMessage [data-testid="chatAvatarIcon-user"] {
+    background: var(--bg-card-hover) !important;
+    animation: avatarUserRing 3.2s ease-in-out infinite !important;
+}
+
+.stChatMessage [data-testid*="vatar"] > * {
+    display: inline-block !important;
+    animation: avatarBreathe 2.8s ease-in-out infinite !important;
+    filter: drop-shadow(0 0 8px rgba(255,107,43,0.35));
+}
+.stChatMessage [data-testid="stChatMessageAvatarAssistant"] > *,
+.stChatMessage [data-testid="chatAvatarIcon-assistant"] > * {
+    animation: avatarBreathe 2.8s ease-in-out infinite,
+               avatarAssistantBob 3.4s ease-in-out infinite !important;
+    filter: drop-shadow(0 0 10px rgba(230,57,70,0.55));
+}
+.stChatMessage [data-testid="stChatMessageAvatarUser"] > *,
+.stChatMessage [data-testid="chatAvatarIcon-user"] > * {
+    animation: avatarBreathe 3.0s ease-in-out infinite,
+               avatarUserSway 4.0s ease-in-out infinite !important;
+    filter: none;
+}
+
+.stChatMessage:hover [data-testid*="vatar"] {
+    transform: scale(1.12) !important;
+}
+
+/* ═══════════════════════════════════════════════════ */
+/* Status widget — rotating-word shimmer (orange)      */
+/* ═══════════════════════════════════════════════════ */
+@keyframes statusShimmer {
+    0%   { background-position: -200% center; }
+    100% { background-position:  200% center; }
+}
+@keyframes statusWordIn {
+    0%   { opacity: 0; transform: translateY(4px); }
+    40%  { opacity: 1; transform: translateY(0); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+[data-testid="stStatusWidget"] summary > div,
+[data-testid="stStatusWidget"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stStatusWidget"] label,
+[data-testid="stStatusWidget"] span {
+    background: linear-gradient(
+        90deg,
+        var(--text-muted) 0%,
+        var(--text-primary) 45%,
+        var(--accent-orange) 50%,
+        var(--text-primary) 55%,
+        var(--text-muted) 100%
+    ) !important;
+    background-size: 200% auto !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    color: transparent !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+    animation: statusShimmer 4s linear infinite, statusWordIn 0.5s ease-out !important;
+}
+
+[data-testid="stStatusWidget"] svg,
+[data-testid="stStatusWidget"] [role="progressbar"] {
+    color: var(--accent-orange) !important;
+    fill: var(--accent-orange) !important;
+}
+
+[data-testid="stSpinner"] > div,
+.stSpinner > div {
+    background: linear-gradient(
+        90deg,
+        var(--text-muted) 0%,
+        var(--text-primary) 45%,
+        var(--accent-orange) 50%,
+        var(--text-primary) 55%,
+        var(--text-muted) 100%
+    ) !important;
+    background-size: 200% auto !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    animation: statusShimmer 4s linear infinite !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2554,7 +2755,8 @@ with st.sidebar:
 # ── Render existing chat history ──────────────────────────────────
 
 for i, entry in enumerate(st.session_state.chat_history):
-    with st.chat_message(entry["role"]):
+    _entry_avatar = AVATAR_ASSISTANT if entry["role"] == "assistant" else AVATAR_USER
+    with st.chat_message(entry["role"], avatar=_entry_avatar):
         if entry["role"] == "assistant":
             if entry.get("tool_used"):
                 st.markdown(_badge(entry["tool_used"]), unsafe_allow_html=True)
@@ -2586,7 +2788,7 @@ if _current_step == "prompted_for_user_profile_data" and st.session_state.profil
         _form_data = dict(_form_existing)
     else:
         # Show form for the missing fields only.
-        with st.chat_message("assistant"):
+        with st.chat_message("assistant", avatar=AVATAR_ASSISTANT):
             _form_data = _render_profile_form(_form_domain, _form_existing)
 
     if _form_data is not None:
@@ -2605,7 +2807,7 @@ if _current_step == "user_profile_mapped" and st.session_state.get("profile_conf
     _confirm_domain = _current_workflow.get("domain", "diet")
     _confirm_existing = st.session_state.agent_state.get("user_profile", {})
 
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=AVATAR_ASSISTANT):
         _confirm_data = _render_profile_confirm_form(_confirm_domain, _confirm_existing)
 
     if _confirm_data is not None:
@@ -2634,7 +2836,7 @@ if prompt:
 
     # ── Display user message (hide synthetic form confirmation) ───
     if not _is_form_auto_confirm:
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar=AVATAR_USER):
             st.markdown(prompt)
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
@@ -2642,7 +2844,7 @@ if prompt:
     st.session_state.agent_state["messages"].append(HumanMessage(content=prompt))
 
     # ── Stream agent response ─────────────────────────────────────
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=AVATAR_ASSISTANT):
         badge_placeholder = st.empty()
         tabs_placeholder = st.empty()
         base_tabs_placeholder = st.empty()
@@ -2657,70 +2859,71 @@ if prompt:
         _form_will_render = False   # suppress display when form takes over
         _tool_structured_data: dict = {}  # macros/hydration from tool response
 
-        # Rotating status phrases per stage — cycled by a background thread
-        import threading, time as _time, itertools
+        # Rotating status words — Claude-Code style: single gerunds,
+        # shuffled per-phase, cycled every ~1.1 s by a background thread.
+        import threading, time as _time, itertools, random
         _STATUS_THINKING = itertools.cycle([
-            "Thinking...",
-            "Understanding your question...",
-            "Analyzing your request...",
+            "Thinking", "Pondering", "Reading", "Parsing",
+            "Weighing", "Considering", "Reasoning", "Listening",
         ])
         _STATUS_TOOL: dict[str, list[str]] = {
             "workout_tool": [
-                "Consulting Workout Coach...",
-                "Reviewing exercise science...",
-                "Designing your routine...",
-                "Selecting optimal exercises...",
-                "Building your workout plan...",
-                "Personalizing for your goals...",
+                "Designing", "Sculpting", "Programming", "Periodizing",
+                "Balancing", "Sequencing", "Tailoring", "Calibrating",
+                "Lifting", "Assembling", "Structuring",
             ],
             "diet_tool": [
-                "Consulting Diet Coach...",
-                "Analyzing nutritional needs...",
-                "Designing your meal plan...",
-                "Balancing your macros...",
-                "Building your diet plan...",
-                "Personalizing for your goals...",
+                "Composing", "Plating", "Balancing", "Portioning",
+                "Tallying", "Seasoning", "Calibrating", "Layering",
+                "Macroing", "Nourishing", "Tailoring",
             ],
         }
         _STATUS_DEFAULT_TOOL = [
-            "Consulting specialist...",
-            "Working on your request...",
-            "Preparing your answer...",
+            "Consulting", "Researching", "Synthesizing",
+            "Analyzing", "Deliberating",
         ]
         _STATUS_GENERATING = [
-            "Crafting your personalized response...",
-            "Polishing the details...",
-            "Putting it all together...",
-            "Almost there...",
+            "Crafting", "Composing", "Polishing", "Refining",
+            "Weaving", "Finishing", "Tightening", "Phrasing",
         ]
 
         _status_phase = "thinking"   # thinking → tool → generating
         _status_stop = threading.Event()
 
         def _rotate_status(st_status):
-            """Background thread: rotate status label every 1.8 s."""
+            """Background thread: rotate one-word status every ~2.2 s."""
             _tool_cycle = None
             _gen_cycle = itertools.cycle(_STATUS_GENERATING)
             while not _status_stop.is_set():
-                _status_stop.wait(1.8)
+                _status_stop.wait(2.2)
                 if _status_stop.is_set():
                     break
                 try:
                     if _status_phase == "thinking":
-                        st_status.update(label=next(_STATUS_THINKING))
+                        _word = next(_STATUS_THINKING)
                     elif _status_phase == "tool":
                         if _tool_cycle is None:
-                            phrases = _STATUS_TOOL.get(tool_used, _STATUS_DEFAULT_TOOL)
+                            phrases = list(_STATUS_TOOL.get(tool_used, _STATUS_DEFAULT_TOOL))
+                            random.shuffle(phrases)
                             _tool_cycle = itertools.cycle(phrases)
-                        st_status.update(label=next(_tool_cycle))
+                        _word = next(_tool_cycle)
                     elif _status_phase == "generating":
-                        st_status.update(label=next(_gen_cycle))
+                        _word = next(_gen_cycle)
+                    else:
+                        continue
+                    # Trailing ellipsis — single char for Claude-style cadence
+                    st_status.update(label=f"{_word}…")
                 except Exception:
                     pass
 
         try:
-          with st.status("Thinking...", expanded=False) as status:
+          with st.status("Thinking…", expanded=False) as status:
+            # CRITICAL: attach ScriptRunContext so status.update() calls from
+            # the background thread actually reach the frontend — without this
+            # Streamlit silently drops widget mutations made off the main thread.
+            from streamlit.runtime.scriptrunner import add_script_run_ctx
             _rotator = threading.Thread(target=_rotate_status, args=(status,), daemon=True)
+            add_script_run_ctx(_rotator)
             _rotator.start()
 
             event_count = 0
@@ -2744,7 +2947,7 @@ if prompt:
                         tool_used = last_msg.tool_calls[0]["name"]
                         tool_label, _, _ = TOOL_LABELS.get(tool_used, ("Specialist", "", "#333"))
                         _status_phase = "tool"
-                        status.update(label=f"Consulting {tool_label}...")
+                        status.update(label=f"Consulting {tool_label}…")
                         badge_placeholder.markdown(_badge(tool_used), unsafe_allow_html=True)
                         _ui_logger.info("[Turn %s] Routed to tool=%s", turn_id, tool_used)
 
@@ -2752,7 +2955,7 @@ if prompt:
                     from langchain_core.messages import ToolMessage
                     if isinstance(last_msg, ToolMessage) and last_msg.content:
                         _status_phase = "generating"
-                        status.update(label="Crafting your personalized response...")
+                        status.update(label="Crafting…")
                         try:
                             parsed = json.loads(last_msg.content)
                             # Check if workflow entered profile collection — form will handle display
@@ -2882,80 +3085,12 @@ if prompt:
                         st.pyplot(fig2)
                         plt.close(fig2)
 
-                elif _is_diet_plan:
-                    from agent.diet_visuals import (
-                        extract_macros_from_plan,
-                        create_macro_donut_chart,
-                    )
-
-                    # ── Macro Pie Chart (next to summary) ───────────────
-                    # Prefer structured_data (accurate) over regex (fragile)
-                    _sd_macros = _tool_structured_data.get("macros", {})
-                    if _sd_macros and _sd_macros.get("protein_g"):
-                        _p_g = float(_sd_macros.get("protein_g", 0))
-                        _c_g = float(_sd_macros.get("carbs_g", 0))
-                        _f_g = float(_sd_macros.get("fat_g", 0))
-                        _total = float(_sd_macros.get("calories", 0))
-                    else:
-                        # Fallback to regex extraction
-                        _macros = extract_macros_from_plan(response_content)
-                        _p_g = _macros.get("protein_g", 0)
-                        _c_g = _macros.get("carbs_g", 0)
-                        _f_g = _macros.get("fat_g", 0)
-                        _total = _macros.get("total_kcal", 0)
-
-                    if _p_g > 0 and _c_g > 0 and _f_g > 0:
-                        st.markdown("---")
-                        st.markdown(
-                            '<p style="font-size:1.1rem;font-weight:800;color:#ff6b2b;'
-                            'margin-bottom:4px;">📊 Macro Distribution</p>',
-                            unsafe_allow_html=True,
-                        )
-                        _macro_col1, _macro_col2 = st.columns([3, 2])
-                        with _macro_col1:
-                            # Summary cards
-                            _mc1, _mc2, _mc3 = st.columns(3)
-                            with _mc1:
-                                st.markdown(
-                                    '<div style="background:#1a1a1a;border:1px solid #2ecc71;'
-                                    'border-radius:12px;padding:14px;text-align:center;">'
-                                    '<div style="color:#888;font-size:0.7rem;font-weight:600;'
-                                    'text-transform:uppercase;letter-spacing:0.08em;">Protein</div>'
-                                    f'<div style="color:#2ecc71;font-size:1.6rem;font-weight:900;">'
-                                    f'{_p_g:.0f}g</div>'
-                                    f'<div style="color:#555;font-size:0.75rem;">'
-                                    f'{_p_g * 4:.0f} kcal</div></div>',
-                                    unsafe_allow_html=True,
-                                )
-                            with _mc2:
-                                st.markdown(
-                                    '<div style="background:#1a1a1a;border:1px solid #3498db;'
-                                    'border-radius:12px;padding:14px;text-align:center;">'
-                                    '<div style="color:#888;font-size:0.7rem;font-weight:600;'
-                                    'text-transform:uppercase;letter-spacing:0.08em;">Carbs</div>'
-                                    f'<div style="color:#3498db;font-size:1.6rem;font-weight:900;">'
-                                    f'{_c_g:.0f}g</div>'
-                                    f'<div style="color:#555;font-size:0.75rem;">'
-                                    f'{_c_g * 4:.0f} kcal</div></div>',
-                                    unsafe_allow_html=True,
-                                )
-                            with _mc3:
-                                st.markdown(
-                                    '<div style="background:#1a1a1a;border:1px solid #e74c3c;'
-                                    'border-radius:12px;padding:14px;text-align:center;">'
-                                    '<div style="color:#888;font-size:0.7rem;font-weight:600;'
-                                    'text-transform:uppercase;letter-spacing:0.08em;">Fat</div>'
-                                    f'<div style="color:#e74c3c;font-size:1.6rem;font-weight:900;">'
-                                    f'{_f_g:.0f}g</div>'
-                                    f'<div style="color:#555;font-size:0.75rem;">'
-                                    f'{_f_g * 9:.0f} kcal</div></div>',
-                                    unsafe_allow_html=True,
-                                )
-
-                        with _macro_col2:
-                            _donut_fig = create_macro_donut_chart(_p_g, _c_g, _f_g, _total)
-                            st.pyplot(_donut_fig, use_container_width=True)
-                            plt.close(_donut_fig)
+                # NOTE: Macro donut + macro cards are rendered in the
+                # LEFT SIDEBAR (see the "Macro Distribution" block in
+                # the sidebar render) after the plan is confirmed.
+                # We intentionally do NOT duplicate them inline in the
+                # assistant response — the LLM's response should stay
+                # textual / tabular only.
 
             except Exception as viz_err:
                 _ui_logger.warning("Visualization error: %s", viz_err, exc_info=True)

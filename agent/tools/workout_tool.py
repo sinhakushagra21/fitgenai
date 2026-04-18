@@ -103,14 +103,15 @@ class WorkoutSessionContext:
         sm = StateManager.from_state(state)
         wf = dict(sm.workflow or {})
 
-        # ── Auto-reset completed / cross-domain workflows ───────
+        # ── Auto-reset truly completed / cross-domain workflows ─────
+        # `workout_confirmed` is NOT a reset trigger — the user is still
+        # being prompted for a sync decision, so preserve the full
+        # workflow so the sync/both/skip reply can route correctly.
         _step = wf.get("step_completed")
         _wf_domain = wf.get("domain")
         _is_completed = (
             _step in _TERMINAL_STEPS
-            or _step == "workout_confirmed"
-            or (_step and "confirmed" in _step)
-            or (_step and "synced" in _step)
+            or (_step and "synced" in _step)   # any *_synced_to_* step
         )
         _is_cross_domain = _wf_domain and _wf_domain != _DOMAIN
         if _is_completed or _is_cross_domain:
@@ -199,6 +200,59 @@ def _build(
     )
 
 
+def _restore_side_query_state(
+    tool_response_json: str,
+    *,
+    orig_workflow: dict[str, Any],
+    orig_profile: dict[str, Any],
+    orig_calendar: bool,
+    context_id: str,
+    user_email: str,
+) -> str:
+    """Post-process a side-query response so it doesn't clobber the
+    active workflow belonging to the OTHER domain. Mirrors the helper
+    in diet_tool.
+    """
+    import json as _json
+
+    from agent.persistence import upsert_context_state
+
+    try:
+        payload = _json.loads(tool_response_json)
+    except Exception:  # noqa: BLE001
+        return tool_response_json
+
+    su = payload.get("state_updates") or {}
+    su["workflow"] = dict(orig_workflow or {})
+    su["user_profile"] = dict(orig_profile or {})
+    payload["state_updates"] = su
+    payload.pop("extra", None)
+
+    try:
+        upsert_context_state(
+            context_id=str(context_id),
+            user_email=str(user_email or ""),
+            user_profile=dict(orig_profile or {}),
+            workflow=dict(orig_workflow or {}),
+            calendar_sync_requested=bool(orig_calendar),
+        )
+        logger.info(
+            "[WorkoutFlow] Side-query: restored caller state "
+            "(workflow_domain=%s, step=%s)",
+            (orig_workflow or {}).get("domain"),
+            (orig_workflow or {}).get("step_completed"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc, module="workout_tool",
+            context="restore side-query state",
+            level="WARNING",
+            extra={"context_id": str(context_id)},
+        )
+
+    return _json.dumps(payload)
+
+
 def _update_workflow(
     ctx: WorkoutSessionContext,
     step_completed: str,
@@ -240,32 +294,34 @@ def _validate_extracted_profile(
 def workout_tool(
     query: str,
     state: Annotated[dict[str, Any], InjectedState],
+    side_query: bool = False,
 ) -> str:
-    """Multi-turn workout agent with create/modify/delete/sync workflow.
+    """Exercise & training specialist. Handles workout plans, training \
+splits, reps/sets, body-part and lift guidance (chest, back, traps, legs, \
+biceps, deadlift, squat, etc.), cardio, mobility, sync to Google Calendar \
+/ Google Fit, and general exercise Q&A.
 
-    IMPORTANT: The 'query' parameter must be the user's EXACT message,
-    word-for-word. Do NOT paraphrase, expand, or add instructions.
+    Use this tool for anything workout-, exercise-, lift-, or body-part-
+    related, including creating, updating, retrieving, confirming, or
+    deleting a workout plan, and for on-topic follow-up training questions.
 
+    The ``query`` MUST be the user's EXACT message, verbatim.
     Returns JSON with assistant_message and state_updates.
     """
     raw_query = _get_raw_user_query(state)
     effective_query = raw_query or query
 
-    logger.info("[WorkoutTool] query: %s", effective_query[:120])
-    if raw_query != query:
-        logger.debug(
-            "[WorkoutTool] Overrode LLM tool arg (len=%d) with raw user "
-            "message (len=%d)",
-            len(query),
-            len(raw_query),
-        )
+    logger.info(
+        "[WorkoutTool] query: %s  side_query=%s",
+        effective_query[:120], side_query,
+    )
 
-    return execute(effective_query, state)
+    return execute(effective_query, state, side_query=side_query)
 
 
-def execute(query: str, state: dict[str, Any]) -> str:
+def execute(query: str, state: dict[str, Any], *, side_query: bool = False) -> str:
     """Execution entrypoint — delegates to handle_multi_turn."""
-    return handle_multi_turn(query=query, state=state)
+    return handle_multi_turn(query=query, state=state, side_query=side_query)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -275,15 +331,23 @@ def execute(query: str, state: dict[str, Any]) -> str:
 _INTENT_HANDLERS: dict[str, Any] = {}
 
 
-def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
+def handle_multi_turn(
+    *,
+    query: str,
+    state: dict[str, Any],
+    side_query: bool = False,
+) -> str:
     """Orchestrate the workout multi-turn workflow.
 
-    Steps:
-      1. Load session via StateManager
-      2. Extract session context
-      3. Classify intent via LLM → WorkoutIntent
-      4. Dispatch to the matching intent handler
+    When ``side_query=True`` we skip classification, force intent to
+    ``general_workout_query``, and restore the caller's original
+    workflow/profile afterwards so a cross-domain probe never clobbers
+    the active diet flow.
     """
+    _orig_workflow = dict(state.get("workflow") or {}) if side_query else None
+    _orig_profile = dict(state.get("user_profile") or {}) if side_query else None
+    _orig_calendar = bool(state.get("calendar_sync_requested", False))
+
     ctx = WorkoutSessionContext.from_state(state)
 
     logger.info(
@@ -294,12 +358,36 @@ def handle_multi_turn(*, query: str, state: dict[str, Any]) -> str:
         len(ctx.plan_text),
     )
 
-    # has_plan is True ONLY for draft plans awaiting review/confirm.
-    # NOTE: from_state() already auto-resets confirmed/terminal
-    # workflows, so ctx is born clean in those cases.
+    if side_query:
+        logger.info("[WorkoutFlow] Side-query mode — forcing general_workout_query")
+        try:
+            result = _handle_general_workout_query(query, ctx)
+        except Exception as exc:  # noqa: BLE001
+            handle_exception(
+                exc, module="workout_tool",
+                context="handler:general_workout_query (side)",
+                extra={"session_id": ctx.session_id},
+            )
+            result = _build(
+                "I had trouble answering that. Please try again.", ctx,
+            )
+        return _restore_side_query_state(
+            result,
+            orig_workflow=_orig_workflow or {},
+            orig_profile=_orig_profile or {},
+            orig_calendar=_orig_calendar,
+            context_id=ctx.session_id,
+            user_email=ctx.user_email,
+        )
+
+    # has_plan tells the classifier whether *any* plan exists — draft
+    # (in session) OR confirmed (in MongoDB). Used by classifier RULE 4
+    # to gate sync requests. Without including "workout_confirmed", a
+    # "sync to calendar" reply at the post-confirm prompt gets
+    # mis-classified as general_workout_query.
     _has_draft_plan = (
-        bool(ctx.plan_text)
-        and ctx.step_completed in _DRAFT_PLAN_STEPS
+        (bool(ctx.plan_text) and ctx.step_completed in _DRAFT_PLAN_STEPS)
+        or ctx.step_completed == "workout_confirmed"
     )
     try:
         classification = classify_intent(
@@ -584,12 +672,15 @@ def _handle_confirm_workout(query: str, ctx: WorkoutSessionContext) -> str:
             "Set FITGEN_USER_EMAIL in .env to enable persistence."
         )
 
-    # ── Clean workflow — plan is in MongoDB, no need to carry it ──
-    ctx.workflow = {}
+    # ── Preserve workflow context for the sync follow-up ──────────────
+    # We intentionally KEEP `workflow.domain="workout"` and
+    # `step_completed="workout_confirmed"` so the router can
+    # deterministically dispatch the user's next reply ("calendar" /
+    # "both" / "skip" / …) to this tool. Plan markdown + structured_data
+    # are cleared because the plan now lives in MongoDB; sync handlers
+    # pull it via _resolve_plan_text.
     ctx.plan_text = ""
-    ctx.step_completed = None
     ctx.completed_steps = []
-    ctx.pending_question = None
 
     _update_workflow(
         ctx,
@@ -613,6 +704,90 @@ def _handle_confirm_workout(query: str, ctx: WorkoutSessionContext) -> str:
         "Or just say **done** if you're all set!",
         ctx,
     )
+
+
+def _wipe_sync_workflow(ctx: WorkoutSessionContext) -> None:
+    """Clear all workflow state after sync decision is terminal."""
+    ctx.workflow = {}
+    ctx.plan_text = ""
+    ctx.step_completed = None
+    ctx.completed_steps = []
+    ctx.pending_question = None
+
+
+def _handle_skip_sync_workout(query: str, ctx: WorkoutSessionContext) -> str:
+    """User declined sync after confirming the plan — wipe workflow."""
+    _wipe_sync_workflow(ctx)
+    return _build(
+        "All set! Your workout plan is confirmed. "
+        "Let me know whenever you need anything else. 💪",
+        ctx,
+    )
+
+
+def _handle_sync_to_both(query: str, ctx: WorkoutSessionContext) -> str:
+    """Sync the plan to BOTH Google Calendar and Google Fit."""
+    _plan = _resolve_plan_text(ctx)
+    if not _plan:
+        return _build(
+            "You don't have a workout plan to sync yet. Create one first!",
+            ctx,
+        )
+
+    try:
+        from agent.tools.calendar_integration import (
+            get_authorization_url, save_oauth_context,
+        )
+
+        auth_url, oauth_state = get_authorization_url()
+        save_oauth_context(
+            plan_text=_plan, domain=_DOMAIN,
+            profile=ctx.profile, sync_target="both",
+        )
+
+        _plan_id = ctx.workflow.get("plan_id")
+        if _plan_id:
+            WorkoutPlanRepository.update_plan(
+                _plan_id, calendar_synced=True, fit_synced=True,
+            )
+
+        _update_workflow(
+            ctx,
+            step_completed="workout_plan_synced_to_google_calendar",
+            step_name="sync_both_started",
+            intent="sync_workout_to_both",
+            oauth_state=oauth_state,
+            pending_question="Click the button in the sidebar to complete the sync.",
+        )
+
+        _wipe_sync_workflow(ctx)
+
+        return _build(
+            "🔗 **Ready to connect Google — syncing to both Calendar & Fit!**\n\n"
+            "Click the **\"📅 Connect Google Calendar\"** button in the sidebar "
+            "to authorise. One sign-in covers both Google Calendar and Google "
+            "Fit.\n\n"
+            f"Or open this link directly: [Authorize FITGEN.AI]({auth_url})",
+            ctx,
+            extra={
+                "calendar_sync_requested": True,
+                "google_fit_sync_requested": True,
+                "calendar_auth_url": auth_url,
+            },
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(
+            exc,
+            module="workout_tool",
+            context="sync to both (calendar + fit)",
+            extra={"session_id": ctx.session_id},
+        )
+        return _build(
+            "Google integration is not configured. Please check "
+            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your .env file.",
+            ctx,
+        )
 
 
 def _handle_update_workout(query: str, ctx: WorkoutSessionContext) -> str:
@@ -799,6 +974,9 @@ def _handle_sync_to_google_calendar(
             oauth_state=oauth_state,
         )
 
+        # Terminal branch — wipe residual workflow.
+        _wipe_sync_workflow(ctx)
+
         return _build(
             "🔗 **Ready to connect Google Calendar!**\n\n"
             "Click the **\"📅 Connect Google Calendar\"** button in the "
@@ -853,6 +1031,9 @@ def _handle_sync_to_google_fit(
             intent="sync_workout_to_google_fit",
         )
 
+        # Terminal branch — wipe residual workflow.
+        _wipe_sync_workflow(ctx)
+
         return _build(
             "💪 **Ready to connect Google Fit!**\n\n"
             "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
@@ -905,5 +1086,7 @@ _INTENT_HANDLERS.update({
     "confirm_workout": _handle_confirm_workout,
     "sync_workout_to_google_calendar": _handle_sync_to_google_calendar,
     "sync_workout_to_google_fit": _handle_sync_to_google_fit,
+    "sync_workout_to_both": _handle_sync_to_both,
+    "skip_sync_workout": _handle_skip_sync_workout,
     "general_workout_query": _handle_general_workout_query,
 })

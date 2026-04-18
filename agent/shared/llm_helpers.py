@@ -230,12 +230,19 @@ Step 4: "{domain}_plan_generated" — A plan has been generated and shown.
 Step 5: "updated_{domain}_plan" — The plan was regenerated after changes.
   → Same as Step 4. "yes" → "confirm_{domain}". Changes → "update_{domain}".
 
-Step 6: "{domain}_confirmed" — Plan is confirmed. Workflow is essentially done.
-  → Sync requests → "sync_{domain}_to_google_calendar" / "sync_{domain}_to_google_fit"
-  → "done" / decline sync → "general_{domain}_query"
+Step 6: "{domain}_confirmed" — Plan is confirmed. The system asked:
+  "Would you like to sync to Google Calendar, Google Fit, or both?
+   (or say 'done' to skip)".
+  → "calendar" / "google calendar" / "sync calendar" → "sync_{domain}_to_google_calendar"
+  → "fit" / "google fit" / "sync fit" → "sync_{domain}_to_google_fit"
+  → "both" / "yes" / "both please" / "do both" / "all" → "sync_{domain}_to_both"
+     (plain "yes" at this step means "both" — the user is agreeing to
+      the default sync offer.)
+  → "done" / "no" / "skip" / "not now" / "later" → "skip_sync_{domain}"
   → "create a new plan" → "create_{domain}" (start over)
   → Questions about the plan ("what should I eat tomorrow", "show my
     plan", "whats my Monday workout") → "get_{domain}"
+  → Generic knowledge questions → "general_{domain}_query"
 
 ═══════════════════════════════════════════════════════════
 CRITICAL RULES (override everything else)
@@ -282,6 +289,8 @@ GENERAL CLASSIFICATION (when no critical rule applies)
   "get my diet", "whats my routine") → "get_{domain}"
 • Sync to Google Calendar → "sync_{domain}_to_google_calendar"
 • Sync to Google Fit → "sync_{domain}_to_google_fit"
+• Sync to BOTH / plain "yes" at sync prompt → "sync_{domain}_to_both"
+• Skip / decline sync ("done", "no", "skip") → "skip_sync_{domain}"
 • General knowledge question NOT about user's plan, small talk → "general_{domain}_query"
 """
 
