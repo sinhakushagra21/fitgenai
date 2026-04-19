@@ -154,8 +154,15 @@ single food words (e.g. "chicken") during profile intake → ALWAYS "stay".
 (unless the active domain is already workout, in which case "stay").
 - Questions about nutrients, meals, recipes, calories, allergies → "side_diet" \
 (unless the active domain is already diet, in which case "stay").
+- Requests to **retrieve / view / get** the OTHER domain's existing plan \
+(e.g. active domain is workout and user says "get my diet plan", "show my \
+diet for tuesday", "what's my vegan meal plan") → "side_diet". The mirror \
+case (active=diet, user asks for workout plan) → "side_workout". These are \
+NOT "switch" — the user isn't abandoning the current workflow, just peeking \
+at the other domain.
 - Only pick "switch" if the user clearly wants to START A NEW PLAN in the \
-other domain. A side question is NOT a switch.
+other domain, or explicitly says things like "forget that", "cancel", \
+"instead make me a ...". A side question or retrieval is NOT a switch.
 
 Respond with ONE lowercase label and nothing else."""
 

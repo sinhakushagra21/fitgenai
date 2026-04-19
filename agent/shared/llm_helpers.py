@@ -463,17 +463,26 @@ def answer_followup_question(
     llm = ChatOpenAI(model=_PLAN_MODEL, temperature=0.4)
 
     if context and context.strip():
+        # Grounded generation: focused retrieved chunks get priority, but
+        # the full plan markdown is still available as a fallback so the
+        # LLM can find details the retriever might have missed (e.g. a
+        # specific day/meal that didn't rank in the top-k).
+        plan_block = (
+            f"\n\nFULL PLAN (fallback — use only if the retrieved "
+            f"context above doesn't cover the question):\n{plan_text}"
+            if plan_text else ""
+        )
         prompt = (
             f"The user has an active {domain} plan. Here is their profile:\n"
             f"{json.dumps(profile, indent=2)}\n\n"
-            f"Here is RETRIEVED CONTEXT from their plan and profile memory:\n"
-            f"---\n{context}\n---\n\n"
+            f"RETRIEVED CONTEXT (ranked passages from their plan + memory):\n"
+            f"---\n{context}\n---"
+            f"{plan_block}\n\n"
             f"The user is asking:\n\"{query}\"\n\n"
-            "Answer ONLY from the CONTEXT above and the profile. "
-            "If the context does not contain enough information to answer, "
-            "say so honestly and suggest what the user could ask for "
-            "instead. Do NOT regenerate the full plan. Keep the answer "
-            "focused and concise. "
+            "Prefer the RETRIEVED CONTEXT. If it is incomplete, consult "
+            "the FULL PLAN. Only say the answer isn't available if "
+            "neither source contains it. Do NOT regenerate the full plan. "
+            "Keep the answer focused and concise. "
             "NEVER use LaTeX (no \\text{}, \\textbf{}, $...$). "
             "Use plain markdown."
         )

@@ -908,6 +908,8 @@ def _handle_get_workout(query: str, ctx: WorkoutSessionContext) -> str:
     ctx.completed_steps = []
     ctx.pending_question = None
 
+    # RAG with graceful fallback: on empty/failure we still have _plan
+    # loaded from MongoDB so answer_plan_question always has something.
     retrieved_context = ""
     if ctx.user_id and not _is_archived:
         try:
@@ -918,8 +920,20 @@ def _handle_get_workout(query: str, ctx: WorkoutSessionContext) -> str:
             )
             if chunks:
                 retrieved_context = "\n\n".join(c.render() for c in chunks)
+                logger.info(
+                    "[workout_tool] RAG hit: %d chunks for query=%r",
+                    len(chunks), query[:80],
+                )
+            else:
+                logger.info(
+                    "[workout_tool] RAG empty — falling back to MongoDB "
+                    "plan_markdown (%d chars)", len(_plan),
+                )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[workout_tool] RAG retrieve failed: %s", exc)
+            logger.warning(
+                "[workout_tool] RAG retrieve failed (%s) — falling back "
+                "to MongoDB plan_markdown", exc,
+            )
 
     answer = answer_plan_question(
         _DOMAIN, _plan, query, context=retrieved_context,
@@ -1142,6 +1156,8 @@ def _handle_general_workout_query(
         _plan = ctx.plan_text  # fallback to session only if same domain
 
     # Personal RAG — fetch top-k chunks from the user's own plan + memory.
+    # Falls back gracefully: if retrieval errors or returns 0 chunks, we
+    # still answer from ``_plan`` (loaded from MongoDB above).
     retrieved_context = ""
     if ctx.user_id:
         try:
@@ -1152,8 +1168,20 @@ def _handle_general_workout_query(
             )
             if chunks:
                 retrieved_context = "\n\n".join(c.render() for c in chunks)
+                logger.info(
+                    "[workout_tool] RAG hit: %d chunks for query=%r",
+                    len(chunks), query[:80],
+                )
+            else:
+                logger.info(
+                    "[workout_tool] RAG empty — falling back to "
+                    "MongoDB plan_markdown (%d chars)", len(_plan),
+                )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[workout_tool] RAG retrieve failed: %s", exc)
+            logger.warning(
+                "[workout_tool] RAG retrieve failed (%s) — falling back "
+                "to MongoDB plan_markdown", exc,
+            )
 
     answer = answer_followup_question(
         _DOMAIN, query, ctx.profile, _plan, ctx.system_prompt,

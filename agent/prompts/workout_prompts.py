@@ -214,13 +214,30 @@ Every full programme response MUST follow these rules:
    | Progression     | (model: linear/undulating/block)             |
    | Deload          | (strategy)                                   |
 
-3. **Daily Schedule Table** — one markdown table covering ALL training \
-   days with columns: Day | Session/Focus | Exercise | Sets x Reps | \
-   Rest | Notes.
-   - Include 4-6 exercises per session.
-   - Include warm-up and cool-down for each session.
+3. **Training Schedule** — one subsection per training day. Each day \
+   MUST be introduced by its own H3 heading and then a small per-day \
+   markdown table. This format is REQUIRED (the app retrieves plans by \
+   day using these headings).
+
+   Format for each training day:
+   ```
+   ### <Day> — <Session name>
+   | Exercise | Sets x Reps | Rest | Notes |
+   |----------|-------------|------|-------|
+   | Warm-up: ... (5 min) | — | — | ... |
+   | <Exercise 1> | 3 x 10 | 60 s | ... |
+   | ... | ... | ... | ... |
+   | Cool-down: ... (3 min) | — | — | ... |
+   ```
+
+   Rules:
+   - `<Day>` MUST be a full weekday name (`Monday`, `Tuesday`, …), NOT \
+     abbreviations like `Mon`.
+   - Include 4-6 exercises per session, plus warm-up and cool-down rows.
    - Specify tempo where relevant (e.g., 3-1-1-0).
    - Show unilateral work as "per side" (e.g., 3 x 10/leg).
+   - Rest days get their own `### <Day> — Rest / Active Recovery` \
+     section with bullet points (no table).
    - **Tutorial column**: A "Tutorial" column with YouTube video links \
      will be automatically appended by the system after generation. \
      Do NOT add a Tutorial column yourself.
@@ -377,8 +394,11 @@ that looks different from the examples.
 1. **Injury Acknowledgement** (only if `additional_info` mentions one)
 2. **Programme Overview Table** — goal, level, frequency, split, \
    session length, progression, deload.
-3. **Daily Schedule Table** — Day | Session | Exercise | Sets x Reps | \
-   Rest. Include warm-up and cool-down per session. A "Tutorial" column \
+3. **Training Schedule** — one subsection per training day, each \
+   introduced by an H3 heading `### <FullDayName> — <Session>` and \
+   followed by its own per-day table (columns: Exercise | Sets x Reps \
+   | Rest | Notes). Use full weekday names (`Monday`, not `Mon`). \
+   Include warm-up and cool-down rows per day. A "Tutorial" column \
    with YouTube links is auto-appended by the system — do NOT add it.
 4. **Progression Plan** — specific load/volume increments.
 5. **Rest Day Guidance** — active recovery suggestions.
@@ -416,29 +436,41 @@ that looks different from the examples.
 
 **Training Schedule**
 
-| Day | Session     | Exercise                 | Sets x Reps | Rest  |
-|-----|-------------|--------------------------|-------------|-------|
-| Mon | Full Body A | Warm-up: jumping jacks, bodyweight squats (5 min) | — | — |
-|     |             | Goblet Squat             | 3 x 12      | 60 s  |
-|     |             | DB Bent-Over Row         | 3 x 12      | 60 s  |
-|     |             | DB Floor Press           | 3 x 12      | 60 s  |
-|     |             | DB Romanian Deadlift     | 3 x 10      | 60 s  |
-|     |             | Plank                    | 3 x 30 s    | 45 s  |
-|     |             | Cool-down: quad stretch, chest stretch, child's pose (3 min) | — | — |
-| Wed | Full Body B | Warm-up: arm circles, hip circles, bodyweight lunges (5 min) | — | — |
-|     |             | DB Reverse Lunge         | 3 x 10/leg  | 60 s  |
-|     |             | DB Shoulder Press        | 3 x 12      | 60 s  |
-|     |             | DB Single-Arm Row        | 3 x 10/arm  | 60 s  |
-|     |             | DB Glute Bridge          | 3 x 15      | 45 s  |
-|     |             | Dead Bug                 | 3 x 8/side  | 45 s  |
-|     |             | Cool-down: hamstring stretch, shoulder stretch (3 min) | — | — |
-| Fri | Full Body C | Warm-up: high knees, bodyweight squats, band pull-aparts (5 min) | — | — |
-|     |             | DB Sumo Squat            | 3 x 12      | 60 s  |
-|     |             | Push-Ups (or DB variant) | 3 x AMRAP   | 60 s  |
-|     |             | DB Swing                 | 3 x 15      | 60 s  |
-|     |             | DB Lateral Raise         | 3 x 12      | 45 s  |
-|     |             | Bird Dog                 | 3 x 8/side  | 45 s  |
-|     |             | Cool-down: pigeon stretch, cat-cow, deep breathing (3 min) | — | — |
+### Monday — Full Body A
+
+| Exercise | Sets x Reps | Rest | Notes |
+|----------|-------------|------|-------|
+| Warm-up: jumping jacks, bodyweight squats (5 min) | — | — | Raise HR, mobilise hips. |
+| Goblet Squat             | 3 x 12      | 60 s  | Keep torso tall. |
+| DB Bent-Over Row         | 3 x 12      | 60 s  | Flat back, lead with elbows. |
+| DB Floor Press           | 3 x 12      | 60 s  | Beginner-friendly vs bench. |
+| DB Romanian Deadlift     | 3 x 10      | 60 s  | Hinge, slight knee bend. |
+| Plank                    | 3 x 30 s    | 45 s  | Neutral spine. |
+| Cool-down: quad stretch, chest stretch, child's pose (3 min) | — | — | Slow nasal breathing. |
+
+### Wednesday — Full Body B
+
+| Exercise | Sets x Reps | Rest | Notes |
+|----------|-------------|------|-------|
+| Warm-up: arm circles, hip circles, bodyweight lunges (5 min) | — | — | Prep lower body. |
+| DB Reverse Lunge         | 3 x 10/leg  | 60 s  | Step back, knee tracks toes. |
+| DB Shoulder Press        | 3 x 12      | 60 s  | Ribs down, no overarch. |
+| DB Single-Arm Row        | 3 x 10/arm  | 60 s  | Strict, no swinging. |
+| DB Glute Bridge          | 3 x 15      | 45 s  | Squeeze glutes 1 s at top. |
+| Dead Bug                 | 3 x 8/side  | 45 s  | Low back flat. |
+| Cool-down: hamstring stretch, shoulder stretch (3 min) | — | — | Hold each 20–30 s. |
+
+### Friday — Full Body C
+
+| Exercise | Sets x Reps | Rest | Notes |
+|----------|-------------|------|-------|
+| Warm-up: high knees, bodyweight squats, band pull-aparts (5 min) | — | — | Full-body mobility. |
+| DB Sumo Squat            | 3 x 12      | 60 s  | Wide stance, toes out. |
+| Push-Ups (or DB variant) | 3 x AMRAP   | 60 s  | Leave 1–2 reps in tank. |
+| DB Swing                 | 3 x 15      | 60 s  | Hip hinge power, not arms. |
+| DB Lateral Raise         | 3 x 12      | 45 s  | Slight forward lean. |
+| Bird Dog                 | 3 x 8/side  | 45 s  | Slow, anti-rotation focus. |
+| Cool-down: pigeon stretch, cat-cow, deep breathing (3 min) | — | — | Down-regulate stress. |
 
 **Progression Plan**
 - Weeks 1-2: Master form with moderate weight.
@@ -502,36 +534,53 @@ exercises that place heavy load on the shoulder in vulnerable positions. \
 
 **Training Schedule**
 
-| Day | Session        | Exercise                     | Sets x Reps | Rest  |
-|-----|----------------|------------------------------|-------------|-------|
-| Mon | Upper (Push)   | Warm-up: band pull-aparts, rotator cuff activation (5 min) | — | — |
-|     |                | Neutral-Grip DB Bench Press   | 4 x 10      | 90 s  |
-|     |                | Landmine Press (single-arm R) | 3 x 10      | 60 s  |
-|     |                | Cable Lateral Raise (light)   | 3 x 15      | 45 s  |
-|     |                | Tricep Pushdown               | 3 x 12      | 60 s  |
-|     |                | Face Pull (light, external rotation focus) | 3 x 15 | 45 s |
-|     |                | Cool-down: shoulder stretches, pec stretch (3 min) | — | — |
-| Tue | Lower          | Warm-up: bodyweight squats, hip circles (5 min) | — | — |
-|     |                | Barbell Back Squat            | 4 x 8       | 2 min |
-|     |                | Romanian Deadlift             | 3 x 10      | 90 s  |
-|     |                | Walking Lunge                 | 3 x 10/leg  | 90 s  |
-|     |                | Leg Curl                      | 3 x 12      | 60 s  |
-|     |                | Calf Raise                    | 4 x 15      | 60 s  |
-|     |                | Cool-down: quad stretch, hamstring stretch (3 min) | — | — |
-| Thu | Upper (Pull)   | Warm-up: band pull-aparts, arm circles (5 min) | — | — |
-|     |                | Neutral-Grip Lat Pulldown     | 4 x 10      | 90 s  |
-|     |                | Seated Cable Row (close grip) | 4 x 12      | 90 s  |
-|     |                | Incline DB Curl               | 3 x 12      | 60 s  |
-|     |                | Hammer Curl                   | 3 x 12      | 60 s  |
-|     |                | Prone Y-Raise (light, rehab)  | 2 x 12      | 45 s  |
-|     |                | Cool-down: lat stretch, bicep stretch (3 min) | — | — |
-| Fri | Lower          | Warm-up: leg swings, glute bridges (5 min) | — | — |
-|     |                | Leg Press                     | 4 x 12      | 90 s  |
-|     |                | DB Bulgarian Split Squat      | 3 x 10/leg  | 90 s  |
-|     |                | Hip Thrust                    | 3 x 12      | 90 s  |
-|     |                | Leg Extension                 | 3 x 12      | 60 s  |
-|     |                | Cable Crunch                  | 3 x 15      | 60 s  |
-|     |                | Cool-down: pigeon stretch, child's pose (3 min) | — | — |
+### Monday — Upper (Push)
+
+| Exercise | Sets x Reps | Rest | Notes |
+|----------|-------------|------|-------|
+| Warm-up: band pull-aparts, rotator cuff activation (5 min) | — | — | Prep shoulder for load. |
+| Neutral-Grip DB Bench Press   | 4 x 10      | 90 s  | Safer for rotator cuff. |
+| Landmine Press (single-arm R) | 3 x 10      | 60 s  | Angled press, gentle ROM. |
+| Cable Lateral Raise (light)   | 3 x 15      | 45 s  | Low load, high reps. |
+| Tricep Pushdown               | 3 x 12      | 60 s  | Elbows pinned. |
+| Face Pull (light, external rotation focus) | 3 x 15 | 45 s | Rehab-friendly. |
+| Cool-down: shoulder stretches, pec stretch (3 min) | — | — | Gentle only. |
+
+### Tuesday — Lower
+
+| Exercise | Sets x Reps | Rest | Notes |
+|----------|-------------|------|-------|
+| Warm-up: bodyweight squats, hip circles (5 min) | — | — | Warm hips and knees. |
+| Barbell Back Squat            | 4 x 8       | 2 min | Depth to parallel. |
+| Romanian Deadlift             | 3 x 10      | 90 s  | Feel hamstring stretch. |
+| Walking Lunge                 | 3 x 10/leg  | 90 s  | Upright torso. |
+| Leg Curl                      | 3 x 12      | 60 s  | Controlled tempo. |
+| Calf Raise                    | 4 x 15      | 60 s  | Pause at top. |
+| Cool-down: quad stretch, hamstring stretch (3 min) | — | — | 20–30 s holds. |
+
+### Thursday — Upper (Pull)
+
+| Exercise | Sets x Reps | Rest | Notes |
+|----------|-------------|------|-------|
+| Warm-up: band pull-aparts, arm circles (5 min) | — | — | Scapular prep. |
+| Neutral-Grip Lat Pulldown     | 4 x 10      | 90 s  | Shoulder-safe grip. |
+| Seated Cable Row (close grip) | 4 x 12      | 90 s  | Lead with elbows. |
+| Incline DB Curl               | 3 x 12      | 60 s  | Full stretch at bottom. |
+| Hammer Curl                   | 3 x 12      | 60 s  | Brachialis focus. |
+| Prone Y-Raise (light, rehab)  | 2 x 12      | 45 s  | External rotation support. |
+| Cool-down: lat stretch, bicep stretch (3 min) | — | — | Gentle holds. |
+
+### Friday — Lower
+
+| Exercise | Sets x Reps | Rest | Notes |
+|----------|-------------|------|-------|
+| Warm-up: leg swings, glute bridges (5 min) | — | — | Activate glutes. |
+| Leg Press                     | 4 x 12      | 90 s  | Controlled depth. |
+| DB Bulgarian Split Squat      | 3 x 10/leg  | 90 s  | Balance first, depth second. |
+| Hip Thrust                    | 3 x 12      | 90 s  | Squeeze glutes 1 s at top. |
+| Leg Extension                 | 3 x 12      | 60 s  | Quad isolation. |
+| Cable Crunch                  | 3 x 15      | 60 s  | Exhale on crunch. |
+| Cool-down: pigeon stretch, child's pose (3 min) | — | — | Slow breathing. |
 
 **Progression Plan**
 - Increase compound lifts by 1-2.5 kg / 2-5 lb per week when all reps \
