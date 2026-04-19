@@ -37,12 +37,28 @@ _COMPLETED_STEPS = frozenset({
 
 
 def apply_tool_state_updates(state: AgentState) -> dict[str, Any]:
-    """Read latest ToolMessage JSON and merge `state_updates` into graph state."""
+    """Read ToolMessage JSON(s) from the current turn and merge `state_updates`.
+
+    Walks the messages in forward order, collecting every trailing
+    ToolMessage produced by the most recent ToolNode execution. When the
+    router dispatches multiple tools in parallel (cross-domain queries
+    like "show diet AND workout plan"), both ToolMessages are merged:
+    MERGE_KEYS (user_profile, calendar_sync_requested) are deep-merged;
+    `workflow` and other scalar keys are last-writer-wins in dispatch
+    order (safe for read-only `get_*` flows; create/update flows are
+    still single-domain in practice).
+    """
     updates: dict[str, Any] = {}
 
+    trailing_tool_messages: list[ToolMessage] = []
     for msg in reversed(state["messages"]):
-        if not isinstance(msg, ToolMessage):
-            continue
+        if isinstance(msg, ToolMessage):
+            trailing_tool_messages.append(msg)
+        else:
+            break
+    trailing_tool_messages.reverse()
+
+    for msg in trailing_tool_messages:
         if not msg.content:
             continue
 
@@ -59,7 +75,7 @@ def apply_tool_state_updates(state: AgentState) -> dict[str, Any]:
             if key == "workflow":
                 updates[key] = value if isinstance(value, dict) else {}
             elif key in MERGE_KEYS and isinstance(value, dict):
-                current = state.get(key, {})
+                current = updates.get(key, state.get(key, {}))
                 if isinstance(current, dict):
                     updates[key] = {**current, **value}
                 else:
@@ -78,8 +94,6 @@ def apply_tool_state_updates(state: AgentState) -> dict[str, Any]:
                         updates[key] = value
                 else:
                     updates[key] = value
-
-        break
 
     context_id = (
         updates.get("context_id")
