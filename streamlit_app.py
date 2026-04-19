@@ -102,40 +102,34 @@ AVATAR_ASSISTANT = "🔥"
 # ── Custom CSS: original orange-theme + avatar/status upgrades ──
 st.markdown("""
 <style>
-/* ── Import Google Fonts (IBM Plex Mono as Berkeley Mono fallback) ── */
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+/* ── Import Google Fonts ────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
-/* ── Root variables — OpenCode dark palette ─────────── */
+/* ── Root variables ─────────────────────────────────── */
 :root {
-    --bg-dark: #201d1d;
-    --bg-card: #302c2c;
-    --bg-card-hover: #3a3636;
-    --accent-orange: #007aff;              /* alias kept; now OpenCode accent blue */
-    --accent-orange-glow: rgba(0, 122, 255, 0.25);
-    --accent-red: #ff3b30;
-    --accent-green: #30d158;
-    --accent-warning: #ff9f0a;
-    --text-primary: #fdfcfc;
-    --text-secondary: #9a9898;
-    --text-muted: #6e6e73;
-    --border-subtle: rgba(15, 0, 0, 0.12);
-    --border-strong: #646262;
-    --gradient-hero: #201d1d;              /* flat — no gradients in OpenCode */
-    --mono-stack: 'Berkeley Mono','IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;
+    --bg-dark: #0a0a0a;
+    --bg-card: #1a1a1a;
+    --bg-card-hover: #222222;
+    --accent-orange: #ff6b2b;
+    --accent-orange-glow: rgba(255, 107, 43, 0.3);
+    --accent-red: #e63946;
+    --accent-green: #2ecc71;
+    --text-primary: #f5f5f5;
+    --text-secondary: #a0a0a0;
+    --text-muted: #666666;
+    --border-subtle: #2a2a2a;
+    --gradient-hero: linear-gradient(135deg, #ff6b2b 0%, #e63946 100%);
 }
 
 /* ── Global overrides ───────────────────────────────── */
 .stApp {
     background-color: var(--bg-dark) !important;
-    font-family: var(--mono-stack) !important;
-}
-html, body, [class*="st-"], [data-testid="stAppViewContainer"] * {
-    font-family: var(--mono-stack) !important;
+    font-family: 'Inter', sans-serif !important;
 }
 
 /* ── Sidebar styling ────────────────────────────────── */
 section[data-testid="stSidebar"] {
-    background: var(--bg-dark) !important;
+    background: linear-gradient(180deg, #111111 0%, #0d0d0d 100%) !important;
     border-right: 1px solid var(--border-subtle) !important;
 }
 
@@ -146,18 +140,18 @@ section[data-testid="stSidebar"] .stMarkdown li {
 }
 
 section[data-testid="stSidebar"] h2 {
-    color: var(--text-primary) !important;
+    color: var(--accent-orange) !important;
     font-size: 1rem !important;
     font-weight: 700 !important;
-    text-transform: none !important;
-    letter-spacing: 0 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
 }
 
 /* ── Chat messages ──────────────────────────────────── */
 .stChatMessage {
     background: var(--bg-card) !important;
     border: 1px solid var(--border-subtle) !important;
-    border-radius: 4px !important;
+    border-radius: 16px !important;
     padding: 1rem 1.25rem !important;
     margin-bottom: 0.75rem !important;
 }
@@ -170,58 +164,47 @@ section[data-testid="stSidebar"] h2 {
 .stChatInput > div {
     background: var(--bg-card) !important;
     border: 1px solid var(--border-subtle) !important;
-    border-radius: 6px !important;
+    border-radius: 16px !important;
 }
 
 .stChatInput textarea {
     color: var(--text-primary) !important;
-    font-family: var(--mono-stack) !important;
 }
 
-/* ── Buttons — single OpenCode variant ──────────────── */
+/* ── Buttons ────────────────────────────────────────── */
 .stButton > button {
-    background: var(--bg-dark) !important;
-    color: var(--text-primary) !important;
-    border: 1px solid var(--border-strong) !important;
-    border-radius: 4px !important;
-    font-family: var(--mono-stack) !important;
-    font-weight: 500 !important;
-    padding: 4px 20px !important;
-    transition: background 0.12s ease, border-color 0.12s ease !important;
+    border-radius: 12px !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
 }
 
 .stButton > button:hover {
-    background: var(--bg-card) !important;
-    border-color: var(--text-secondary) !important;
-    transform: none !important;
-    box-shadow: none !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 15px var(--accent-orange-glow) !important;
 }
 
 .stFormSubmitButton > button {
-    background: var(--bg-dark) !important;
-    color: var(--text-primary) !important;
-    border: 1px solid var(--border-strong) !important;
-    border-radius: 4px !important;
-    font-family: var(--mono-stack) !important;
-    font-weight: 500 !important;
+    background: var(--gradient-hero) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    font-weight: 700 !important;
     font-size: 1rem !important;
-    padding: 4px 20px !important;
-    letter-spacing: 0 !important;
-    transition: background 0.12s ease, border-color 0.12s ease !important;
+    padding: 0.6rem 2rem !important;
+    letter-spacing: 0.02em !important;
+    transition: all 0.3s ease !important;
 }
 
 .stFormSubmitButton > button:hover {
-    background: var(--bg-card) !important;
-    border-color: var(--text-secondary) !important;
-    transform: none !important;
-    box-shadow: none !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 25px var(--accent-orange-glow) !important;
 }
 
 /* ── Forms ──────────────────────────────────────────── */
 [data-testid="stForm"] {
     background: var(--bg-card) !important;
     border: 1px solid var(--border-subtle) !important;
-    border-radius: 4px !important;
+    border-radius: 16px !important;
     padding: 1.5rem !important;
 }
 
@@ -229,33 +212,27 @@ section[data-testid="stSidebar"] h2 {
 .stTextInput > div > div,
 .stNumberInput > div > div,
 .stSelectbox > div > div {
-    background: var(--bg-card) !important;
+    background: #111111 !important;
     border: 1px solid var(--border-subtle) !important;
-    border-radius: 6px !important;
+    border-radius: 10px !important;
     color: var(--text-primary) !important;
 }
 
 .stTextInput input,
 .stNumberInput input {
     color: var(--text-primary) !important;
-    font-family: var(--mono-stack) !important;
-}
-.stTextInput > div > div:focus-within,
-.stNumberInput > div > div:focus-within,
-.stSelectbox > div > div:focus-within {
-    border-color: #007aff !important;
 }
 
 /* ── Progress bar ───────────────────────────────────── */
 .stProgress > div > div > div {
-    background: #007aff !important;
-    border-radius: 4px !important;
+    background: var(--gradient-hero) !important;
+    border-radius: 10px !important;
 }
 
 /* ── Expanders ──────────────────────────────────────── */
 .streamlit-expanderHeader {
     background: var(--bg-card) !important;
-    border-radius: 4px !important;
+    border-radius: 12px !important;
     color: var(--text-primary) !important;
 }
 
@@ -263,7 +240,7 @@ section[data-testid="stSidebar"] h2 {
 [data-testid="stStatusWidget"] {
     background: var(--bg-card) !important;
     border: 1px solid var(--border-subtle) !important;
-    border-radius: 4px !important;
+    border-radius: 12px !important;
 }
 
 /* ── Dividers ───────────────────────────────────────── */
@@ -273,22 +250,36 @@ hr {
 
 /* ── Custom hero section ────────────────────────────── */
 .hero-container {
-    background: var(--bg-dark);
+    background: linear-gradient(135deg, rgba(255,107,43,0.08) 0%, rgba(230,57,70,0.05) 100%);
     border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border-radius: 20px;
     padding: 2rem 2.5rem;
     margin-bottom: 1.5rem;
     position: relative;
     overflow: hidden;
 }
 
+.hero-container::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(255,107,43,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+}
+
 .hero-title {
-    font-family: var(--mono-stack);
-    font-size: 2.38rem;
-    font-weight: 700;
-    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #ff6b2b 0%, #ff8f5e 50%, #e63946 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
     margin-bottom: 0.25rem;
-    line-height: 1.5;
+    line-height: 1.1;
 }
 
 .hero-subtitle {
@@ -297,7 +288,6 @@ hr {
     font-weight: 400;
     margin-bottom: 1.25rem;
     max-width: 600px;
-    font-family: var(--mono-stack);
 }
 
 .hero-tags {
@@ -307,58 +297,54 @@ hr {
 }
 
 .hero-tag {
-    background: var(--bg-card);
-    color: var(--text-primary);
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-size: 0.82rem;
-    font-weight: 500;
-    border: 1px solid var(--border-subtle);
-    font-family: var(--mono-stack);
+    background: rgba(255,107,43,0.12);
+    color: var(--accent-orange);
+    padding: 0.3rem 0.85rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border: 1px solid rgba(255,107,43,0.2);
+    letter-spacing: 0.02em;
 }
 
-/* ── Tool badges — flat single style ────────────────── */
+/* ── Tool badges ────────────────────────────────────── */
 .tool-badge {
     display: inline-block;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 0.03em;
     margin-bottom: 8px;
-    font-family: var(--mono-stack);
 }
 
-.tool-badge-workout,
-.tool-badge-diet,
-.tool-badge-general,
-.tool-badge-rag { background: var(--bg-card); color: var(--text-primary); }
+.tool-badge-workout { background: linear-gradient(135deg, #2e7d32, #4caf50); }
+.tool-badge-diet    { background: linear-gradient(135deg, #1565c0, #42a5f5); }
+.tool-badge-general { background: linear-gradient(135deg, #6a1b9a, #ab47bc); }
+.tool-badge-rag     { background: linear-gradient(135deg, #e65100, #ff9800); }
 
 /* ── Sidebar stats cards ────────────────────────────── */
 .stat-card {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border-radius: 12px;
     padding: 0.75rem 1rem;
     margin-bottom: 0.5rem;
 }
 
 .stat-card-label {
     color: var(--text-muted);
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-transform: none;
-    letter-spacing: 0;
-    font-family: var(--mono-stack);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
 }
 
 .stat-card-value {
-    color: var(--text-primary);
-    font-size: 1.25rem;
-    font-weight: 700;
-    font-family: var(--mono-stack);
+    color: var(--accent-orange);
+    font-size: 1.3rem;
+    font-weight: 800;
 }
 
 /* ── Sidebar progress section ───────────────────────── */
@@ -378,22 +364,21 @@ hr {
     display: inline-block;
 }
 
-.progress-dot-done     { background: #30d158; }
-.progress-dot-active   { background: #007aff; }
+.progress-dot-done     { background: var(--accent-green); }
+.progress-dot-active   { background: var(--accent-orange); box-shadow: 0 0 8px var(--accent-orange-glow); }
 .progress-dot-pending  { background: var(--text-muted); }
 
 /* ── Metrics override ───────────────────────────────── */
 [data-testid="stMetric"] {
     background: var(--bg-card) !important;
     border: 1px solid var(--border-subtle) !important;
-    border-radius: 4px !important;
+    border-radius: 12px !important;
     padding: 0.75rem 1rem !important;
 }
 
 [data-testid="stMetricValue"] {
-    color: var(--text-primary) !important;
-    font-weight: 700 !important;
-    font-family: var(--mono-stack) !important;
+    color: var(--accent-orange) !important;
+    font-weight: 800 !important;
 }
 
 /* ── Scrollbar ──────────────────────────────────────── */
@@ -406,21 +391,20 @@ hr {
 
 /* Section headings inside responses */
 .stChatMessage h2, .stChatMessage h3, .stChatMessage h4 {
-    color: var(--text-primary) !important;
+    color: var(--accent-orange) !important;
     font-weight: 700 !important;
     margin-top: 1.2rem !important;
     margin-bottom: 0.4rem !important;
     padding-bottom: 0.3rem !important;
-    border-bottom: 1px solid var(--border-subtle) !important;
+    border-bottom: 1px solid rgba(255, 107, 43, 0.12) !important;
     font-size: 1rem !important;
-    letter-spacing: 0 !important;
-    font-family: var(--mono-stack) !important;
+    letter-spacing: 0.01em !important;
 }
 .stChatMessage h2 { font-size: 1.1rem !important; }
 
 /* Bold exercise / food names */
 .stChatMessage strong {
-    color: var(--text-primary) !important;
+    color: #f0f0f0 !important;
     font-weight: 700 !important;
 }
 
@@ -436,13 +420,14 @@ hr {
     position: relative;
     padding: 0.65rem 0.9rem 0.65rem 2.8rem !important;
     margin-bottom: 0.35rem !important;
-    background: var(--bg-card) !important;
-    border: 1px solid var(--border-subtle) !important;
-    border-radius: 4px !important;
-    transition: background 0.12s ease;
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(255, 255, 255, 0.04) !important;
+    border-radius: 12px !important;
+    border-left: 3px solid var(--accent-orange) !important;
+    transition: background 0.2s ease;
 }
 .stChatMessage ol > li:hover {
-    background: var(--bg-card-hover) !important;
+    background: rgba(255, 107, 43, 0.04) !important;
 }
 .stChatMessage ol > li::before {
     content: counter(item);
@@ -451,17 +436,15 @@ hr {
     top: 0.7rem;
     width: 1.4rem;
     height: 1.4rem;
-    background: var(--bg-dark);
-    color: var(--text-primary);
+    background: linear-gradient(135deg, rgba(255,107,43,0.2), rgba(230,57,70,0.15));
+    color: var(--accent-orange);
     font-size: 0.75rem;
-    font-weight: 700;
-    border-radius: 4px;
-    border: 1px solid var(--border-strong);
+    font-weight: 800;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
-    font-family: var(--mono-stack);
 }
 
 /* Nested bullet points (exercise details) */
@@ -500,53 +483,58 @@ hr {
     width: 100% !important;
     border-collapse: separate !important;
     border-spacing: 0 !important;
-    border-radius: 4px !important;
+    border-radius: 12px !important;
     overflow: hidden !important;
     margin: 0.8rem 0 1rem 0 !important;
-    border: 1px solid var(--border-subtle) !important;
-    font-size: 0.88rem !important;
-    font-family: var(--mono-stack) !important;
+    border: 1px solid rgba(255,107,43,0.15) !important;
+    font-size: 0.84rem !important;
 }
 .stChatMessage thead th {
-    background: var(--bg-dark) !important;
-    color: var(--text-primary) !important;
+    background: linear-gradient(135deg, rgba(255,107,43,0.18) 0%, rgba(230,57,70,0.12) 100%) !important;
+    color: #f5f5f5 !important;
     font-weight: 700 !important;
-    font-size: 0.82rem !important;
-    text-transform: none !important;
-    letter-spacing: 0 !important;
+    font-size: 0.78rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
     padding: 0.65rem 0.75rem !important;
-    border-bottom: 1px solid var(--border-strong) !important;
+    border-bottom: 2px solid rgba(255,107,43,0.25) !important;
     text-align: left !important;
     white-space: nowrap !important;
 }
 .stChatMessage tbody td {
     padding: 0.55rem 0.75rem !important;
     color: var(--text-secondary) !important;
-    border-bottom: 1px solid var(--border-subtle) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.04) !important;
+    transition: background 0.2s ease, color 0.2s ease !important;
     vertical-align: top !important;
 }
+.stChatMessage tbody tr:nth-child(even) td {
+    background: rgba(255,255,255,0.015) !important;
+}
 .stChatMessage tbody tr:hover td {
-    background: var(--bg-card-hover) !important;
+    background: rgba(255,107,43,0.06) !important;
     color: var(--text-primary) !important;
 }
+/* First column bold (meal/exercise name) */
 .stChatMessage tbody td:first-child {
     color: var(--text-primary) !important;
-    font-weight: 500 !important;
+    font-weight: 600 !important;
 }
+/* Last row in tbody = totals row — highlight it */
 .stChatMessage tbody tr:last-child td {
     font-weight: 700 !important;
-    color: var(--text-primary) !important;
-    border-top: 1px solid var(--border-strong) !important;
-    background: var(--bg-dark) !important;
+    color: var(--accent-orange) !important;
+    border-top: 2px solid rgba(255,107,43,0.2) !important;
+    background: rgba(255,107,43,0.04) !important;
 }
 
 /* ── Blockquotes (tips / notes) ────────────────────── */
 .stChatMessage blockquote {
-    border-left: 2px solid var(--text-secondary) !important;
-    background: var(--bg-dark) !important;
+    border-left: 3px solid var(--accent-orange) !important;
+    background: rgba(255,107,43,0.04) !important;
     margin: 0.75rem 0 !important;
     padding: 0.6rem 1rem !important;
-    border-radius: 0 4px 4px 0 !important;
+    border-radius: 0 10px 10px 0 !important;
     color: var(--text-secondary) !important;
     font-size: 0.88rem !important;
 }
@@ -555,20 +543,18 @@ hr {
 .stChatMessage hr {
     border: none !important;
     height: 1px !important;
-    background: var(--border-subtle) !important;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,107,43,0.25) 50%, transparent 100%) !important;
     margin: 1.2rem 0 !important;
 }
 
 /* ── Inline code ───────────────────────────────────── */
 .stChatMessage code:not(pre code) {
-    background: var(--bg-dark) !important;
-    color: var(--text-primary) !important;
+    background: rgba(255,107,43,0.1) !important;
+    color: #ff8f5e !important;
     padding: 0.15rem 0.45rem !important;
-    border-radius: 4px !important;
-    font-size: 0.85rem !important;
-    font-weight: 500 !important;
-    border: 1px solid var(--border-subtle) !important;
-    font-family: var(--mono-stack) !important;
+    border-radius: 6px !important;
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
 }
 
 /* Streaming cursor */
@@ -576,7 +562,7 @@ hr {
     display: inline-block;
     width: 2px;
     height: 1.1em;
-    background: var(--text-primary);
+    background: var(--accent-orange);
     margin-left: 2px;
     vertical-align: text-bottom;
     animation: blink 0.8s step-end infinite;
@@ -587,9 +573,9 @@ hr {
 
 /* ── Profile card ──────────────────────────────────── */
 .profile-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    background: linear-gradient(145deg, rgba(255,107,43,0.06), rgba(230,57,70,0.04));
+    border: 1px solid rgba(255,107,43,0.15);
+    border-radius: 14px;
     padding: 0.85rem 0.8rem;
     margin-bottom: 0.25rem;
 }
@@ -601,22 +587,36 @@ hr {
     width: 44px; height: 44px;
     flex-shrink: 0;
 }
+.profile-avatar-ring::before {
+    content: '';
+    position: absolute;
+    inset: -2.5px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ff6b2b, #e63946, #ff6b2b);
+    background-size: 200% 200%;
+    animation: avatarRingShift 4s ease infinite;
+    z-index: 0;
+}
+@keyframes avatarRingShift {
+    0%, 100% { background-position: 0% 50%; }
+    50%      { background-position: 100% 50%; }
+}
 .profile-avatar {
     position: relative;
     z-index: 1;
-    width: 44px; height: 44px; border-radius: 4px;
-    background: var(--bg-dark);
-    border: 1px solid var(--border-strong);
+    width: 44px; height: 44px; border-radius: 50%;
+    background: linear-gradient(135deg, #ff6b2b 0%, #e63946 100%);
     display: flex; align-items: center; justify-content: center;
-    color: var(--text-primary); font-weight: 700; font-size: 1.15rem;
-    font-family: var(--mono-stack);
+    color: white; font-weight: 800; font-size: 1.15rem;
+    letter-spacing: 0.02em;
+    box-shadow: 0 2px 10px rgba(255,107,43,0.25);
 }
 .profile-status-dot {
     position: absolute;
     bottom: 1px; right: 1px;
     width: 10px; height: 10px;
-    background: #30d158;
-    border: 2px solid var(--bg-dark);
+    background: #22c55e;
+    border: 2px solid #0e1117;
     border-radius: 50%;
     z-index: 2;
 }
@@ -625,107 +625,98 @@ hr {
     flex: 1;
 }
 .profile-name {
-    color: var(--text-primary); font-size: 0.9rem; font-weight: 700;
-    line-height: 1.5;
+    color: var(--text-primary); font-size: 0.88rem; font-weight: 700;
+    line-height: 1.25;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-family: var(--mono-stack);
 }
 .profile-email {
-    color: var(--text-muted); font-size: 0.75rem; line-height: 1.5;
+    color: var(--text-muted); font-size: 0.68rem; line-height: 1.25;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     margin-top: 1px;
-    font-family: var(--mono-stack);
 }
 .profile-badge {
     display: inline-block;
     margin-top: 4px;
-    padding: 2px 8px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--text-primary);
-    background: var(--bg-dark);
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
-    font-family: var(--mono-stack);
+    padding: 1px 7px;
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #ff6b2b;
+    background: rgba(255,107,43,0.1);
+    border: 1px solid rgba(255,107,43,0.2);
+    border-radius: 6px;
 }
 
 /* ── Workout card ──────────────────────────────────── */
 .workout-card {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border-radius: 12px;
     padding: 0.7rem 0.9rem;
     margin-bottom: 0.4rem;
 }
 .workout-card-session {
-    color: var(--text-primary);
+    color: var(--accent-orange);
     font-size: 1rem; font-weight: 700;
-    font-family: var(--mono-stack);
 }
 .workout-card-day {
     color: var(--text-muted);
-    font-size: 0.75rem; text-transform: none;
-    letter-spacing: 0; font-weight: 500;
-    font-family: var(--mono-stack);
+    font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: 600;
 }
 .workout-exercise {
     color: var(--text-secondary);
-    font-size: 0.88rem; padding: 0.15rem 0;
+    font-size: 0.8rem; padding: 0.15rem 0;
     display: flex; justify-content: space-between;
-    font-family: var(--mono-stack);
 }
 .workout-exercise-sets {
-    color: var(--text-muted); font-size: 0.82rem;
+    color: var(--text-muted); font-size: 0.75rem;
 }
 
 /* ── Water tracker ─────────────────────────────────── */
 .water-progress-bar {
-    background: var(--bg-dark);
+    background: #1a1a1a;
     border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border-radius: 8px;
     height: 18px;
     overflow: hidden;
     margin: 0.4rem 0;
 }
 .water-progress-fill {
     height: 100%;
-    background: #007aff;
-    border-radius: 4px;
-    transition: width 0.2s ease;
+    background: linear-gradient(90deg, #1a73e8, #34a0f5);
+    border-radius: 8px;
+    transition: width 0.3s ease;
 }
 .water-label {
     color: var(--text-secondary);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     display: flex; justify-content: space-between;
     align-items: center;
-    font-family: var(--mono-stack);
 }
 
 /* ── Daily tip ─────────────────────────────────────── */
 .tip-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    background: linear-gradient(135deg, rgba(255,107,43,0.08), rgba(230,57,70,0.05));
+    border: 1px solid rgba(255,107,43,0.15);
+    border-radius: 12px;
     padding: 0.7rem 0.9rem;
     margin-bottom: 0.4rem;
 }
 .tip-text {
     color: var(--text-secondary);
-    font-size: 0.88rem;
+    font-size: 0.82rem;
     line-height: 1.5;
-    font-style: normal;
-    font-family: var(--mono-stack);
+    font-style: italic;
 }
 .tip-label {
-    color: var(--text-primary);
-    font-size: 0.75rem;
+    color: var(--accent-orange);
+    font-size: 0.68rem;
     font-weight: 700;
-    text-transform: none;
-    letter-spacing: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     margin-bottom: 0.25rem;
-    font-family: var(--mono-stack);
 }
 
 /* ── Sidebar button & text spacing ────────────────── */
@@ -775,24 +766,23 @@ div[data-baseweb="base-input"] {
 }
 [data-testid="stChatInput"] {
     border: 1px solid var(--border-subtle) !important;
-    border-radius: 6px !important;
-    box-shadow: none !important;
+    border-radius: 14px !important;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.03), rgba(0,0,0,0.35) 0px 4px 18px !important;
     padding: 2px !important;
-    transition: border-color 0.12s ease !important;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease !important;
 }
 [data-testid="stChatInput"]:focus-within {
-    border-color: #007aff !important;
-    box-shadow: none !important;
+    border-color: var(--accent-orange) !important;
+    box-shadow: 0 0 0 1px var(--accent-orange), var(--accent-orange-glow) 0px 4px 20px !important;
 }
 [data-testid="stChatInput"] textarea,
 .stChatInput textarea {
     background: transparent !important;
     background-color: transparent !important;
     color: var(--text-primary) !important;
-    caret-color: #007aff !important;
-    font-size: 1rem !important;
+    caret-color: var(--accent-orange) !important;
+    font-size: 0.95rem !important;
     line-height: 1.5 !important;
-    font-family: var(--mono-stack) !important;
 }
 [data-testid="stChatInput"] textarea::placeholder,
 .stChatInput textarea::placeholder {
@@ -800,22 +790,21 @@ div[data-baseweb="base-input"] {
     font-style: normal !important;
 }
 [data-testid="stChatInput"] button {
-    background: var(--bg-dark) !important;
+    background: var(--bg-card-hover) !important;
     color: var(--text-primary) !important;
-    border: 1px solid var(--border-strong) !important;
-    border-radius: 4px !important;
-    box-shadow: none !important;
-    transition: background 0.12s ease, border-color 0.12s ease !important;
+    border: none !important;
+    border-radius: 10px !important;
+    box-shadow: 0 0 0 1px var(--border-subtle) !important;
+    transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease !important;
 }
 [data-testid="stChatInput"] button:hover:not(:disabled) {
-    background: var(--bg-card) !important;
-    border-color: var(--text-secondary) !important;
-    box-shadow: none !important;
-    transform: none !important;
+    background: var(--accent-orange) !important;
+    box-shadow: 0 0 0 1px var(--accent-orange), var(--accent-orange-glow) 0 4px 14px !important;
+    transform: translateY(-1px) !important;
 }
 [data-testid="stChatInput"] button:hover:not(:disabled) svg {
-    color: var(--text-primary) !important;
-    fill: var(--text-primary) !important;
+    color: #fff !important;
+    fill: #fff !important;
 }
 [data-testid="stChatInput"] button svg {
     color: var(--text-primary) !important;
@@ -839,12 +828,12 @@ div[data-baseweb="base-input"] {
     50%      { transform: rotate(3deg); }
 }
 @keyframes avatarFlameRing {
-    0%, 100% { box-shadow: 0 0 0 1px var(--border-strong); }
-    50%      { box-shadow: 0 0 0 1px var(--text-secondary); }
+    0%, 100% { box-shadow: 0 0 0 1px var(--accent-orange), 0 0 0 3px rgba(255,107,43,0.25), 0 0 12px rgba(255,107,43,0.30); }
+    50%      { box-shadow: 0 0 0 1px var(--accent-red),    0 0 0 4px rgba(230,57,70,0.18),  0 0 18px rgba(230,57,70,0.45); }
 }
 @keyframes avatarUserRing {
     0%, 100% { box-shadow: 0 0 0 1px var(--border-subtle); }
-    50%      { box-shadow: 0 0 0 1px var(--border-strong); }
+    50%      { box-shadow: 0 0 0 1px #444, 0 0 0 3px rgba(160,160,160,0.15); }
 }
 
 .stChatMessage [data-testid*="hatAvatar"],
@@ -868,7 +857,7 @@ div[data-baseweb="base-input"] {
 
 .stChatMessage [data-testid="stChatMessageAvatarAssistant"],
 .stChatMessage [data-testid="chatAvatarIcon-assistant"] {
-    background: var(--bg-card) !important;
+    background: radial-gradient(circle at 30% 30%, rgba(255,107,43,0.18) 0%, var(--bg-card-hover) 75%) !important;
     animation: avatarFlameRing 2.6s ease-in-out infinite !important;
 }
 
@@ -881,13 +870,13 @@ div[data-baseweb="base-input"] {
 .stChatMessage [data-testid*="vatar"] > * {
     display: inline-block !important;
     animation: avatarBreathe 2.8s ease-in-out infinite !important;
-    filter: none;
+    filter: drop-shadow(0 0 8px rgba(255,107,43,0.35));
 }
 .stChatMessage [data-testid="stChatMessageAvatarAssistant"] > *,
 .stChatMessage [data-testid="chatAvatarIcon-assistant"] > * {
     animation: avatarBreathe 2.8s ease-in-out infinite,
                avatarAssistantBob 3.4s ease-in-out infinite !important;
-    filter: none;
+    filter: drop-shadow(0 0 10px rgba(230,57,70,0.55));
 }
 .stChatMessage [data-testid="stChatMessageAvatarUser"] > *,
 .stChatMessage [data-testid="chatAvatarIcon-user"] > * {
@@ -920,7 +909,9 @@ div[data-baseweb="base-input"] {
     background: linear-gradient(
         90deg,
         var(--text-muted) 0%,
-        var(--text-primary) 50%,
+        var(--text-primary) 45%,
+        var(--accent-orange) 50%,
+        var(--text-primary) 55%,
         var(--text-muted) 100%
     ) !important;
     background-size: 200% auto !important;
@@ -935,8 +926,8 @@ div[data-baseweb="base-input"] {
 
 [data-testid="stStatusWidget"] svg,
 [data-testid="stStatusWidget"] [role="progressbar"] {
-    color: var(--text-primary) !important;
-    fill: var(--text-primary) !important;
+    color: var(--accent-orange) !important;
+    fill: var(--accent-orange) !important;
 }
 
 [data-testid="stSpinner"] > div,
@@ -944,7 +935,9 @@ div[data-baseweb="base-input"] {
     background: linear-gradient(
         90deg,
         var(--text-muted) 0%,
-        var(--text-primary) 50%,
+        var(--text-primary) 45%,
+        var(--accent-orange) 50%,
+        var(--text-primary) 55%,
         var(--text-muted) 100%
     ) !important;
     background-size: 200% auto !important;
@@ -1117,8 +1110,24 @@ if not _is_authenticated:
         50%      { opacity: 1; }
     }
 
-    .stApp::before { content: none !important; }
-    .stApp::after  { content: none !important; }
+    .stApp::before {
+        content: '';
+        position: fixed; top: -10%; right: -5%;
+        width: 600px; height: 600px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(255,107,43,0.15) 0%, transparent 70%);
+        filter: blur(80px);
+        animation: blob1 15s ease-in-out infinite;
+        pointer-events: none; z-index: 0;
+    }
+    .stApp::after {
+        content: '';
+        position: fixed; bottom: -10%; left: -5%;
+        width: 500px; height: 500px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(230,57,70,0.10) 0%, transparent 70%);
+        filter: blur(80px);
+        animation: blob2 18s ease-in-out infinite;
+        pointer-events: none; z-index: 0;
+    }
 
     /* ── Login: center column acts as card ────────────── */
     [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
@@ -1130,48 +1139,44 @@ if not _is_authenticated:
         z-index: 1;
     }
 
-    /* ── Login: Google button (OpenCode dark) ─────────── */
+    /* ── Login: Google button (white, prominent) ─────── */
     a[data-testid="baseLinkButton-secondary"] {
-        background: #201d1d !important;
-        color: #fdfcfc !important;
-        border: 1px solid #646262 !important;
-        border-radius: 4px !important;
-        font-weight: 500 !important;
-        font-size: 1rem !important;
-        padding: 4px 20px !important;
-        transition: background 0.12s ease, border-color 0.12s ease !important;
-        box-shadow: none !important;
+        background: #ffffff !important;
+        color: #1a1a1a !important;
+        border: none !important;
+        border-radius: 12px !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        padding: 0.78rem 1.5rem !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 2px 15px rgba(0,0,0,0.2) !important;
         text-decoration: none !important;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace !important;
     }
     a[data-testid="baseLinkButton-secondary"]:hover {
-        background: #302c2c !important;
-        border-color: #9a9898 !important;
-        transform: none !important;
-        box-shadow: none !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 30px rgba(255,255,255,0.08) !important;
     }
     a[data-testid="baseLinkButton-secondary"] p {
-        color: #fdfcfc !important;
-        font-weight: 500 !important;
+        color: #1a1a1a !important;
+        font-weight: 700 !important;
     }
 
-    /* ── Login: dev button ──────────────────────────── */
+    /* ── Login: dev button (subtle, dashed) ──────────── */
     button[data-testid="baseButton-secondary"] {
-        background: #201d1d !important;
-        color: #9a9898 !important;
-        border: 1px solid rgba(15, 0, 0, 0.12) !important;
-        border-radius: 4px !important;
+        background: transparent !important;
+        color: #666 !important;
+        border: 1px dashed #333 !important;
+        border-radius: 10px !important;
         font-weight: 500 !important;
-        font-size: 0.88rem !important;
-        padding: 4px 20px !important;
-        transition: background 0.12s ease, border-color 0.12s ease !important;
-        letter-spacing: 0 !important;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace !important;
+        font-size: 0.82rem !important;
+        padding: 0.55rem 1rem !important;
+        transition: all 0.3s ease !important;
+        letter-spacing: 0.01em !important;
     }
     button[data-testid="baseButton-secondary"]:hover {
-        border-color: #646262 !important;
-        color: #fdfcfc !important;
-        background: #302c2c !important;
+        border-color: #555 !important;
+        color: #999 !important;
+        background: rgba(255,255,255,0.03) !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -1197,8 +1202,8 @@ if not _is_authenticated:
         50%      { transform: translateY(-6px); }
     }
     @keyframes glowPulse {
-        0%, 100% { box-shadow: none; }
-        50%      { box-shadow: none; }
+        0%, 100% { box-shadow: 0 0 12px rgba(255,107,43,0.15); }
+        50%      { box-shadow: 0 0 28px rgba(255,107,43,0.30); }
     }
     @keyframes drawArrow {
         from { opacity: 0; transform: translateX(-8px); }
@@ -1215,184 +1220,174 @@ if not _is_authenticated:
         width: 76px; height: 76px; margin: 0 auto 1.1rem auto;
         display: flex; align-items: center; justify-content: center;
         font-size: 2.3rem;
-        background: transparent;
-        border-radius: 4px;
-        animation: landScaleIn 0.6s ease-out forwards;
+        background: radial-gradient(circle, rgba(255,107,43,0.10) 0%, transparent 70%);
+        border-radius: 50%;
+        animation: landScaleIn 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards,
+                   glowPulse 3s ease-in-out 0.8s infinite;
         opacity: 0;
     }
 
-    /* ── Title (flat monospace) ──────────────────────── */
+    /* ── Title (shimmer gradient) ────────────────────── */
     .landing-title {
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
-        font-size: 2.38rem; font-weight: 700;
-        text-align: center; letter-spacing: 0;
+        font-family: Inter, -apple-system, sans-serif;
+        font-size: 2.8rem; font-weight: 900;
+        text-align: center; letter-spacing: -0.03em;
         margin-bottom: 0.2rem;
-        color: #fdfcfc;
-        line-height: 1.5;
-        animation: landFadeUp 0.5s ease-out 0.1s forwards;
+        background: linear-gradient(
+            90deg, #ff6b2b 0%, #ff8f5e 25%, #e63946 50%, #ff8f5e 75%, #ff6b2b 100%
+        );
+        background-size: 200% auto;
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: landFadeUp 0.7s ease-out 0.15s forwards,
+                   shimmerGradient 6s linear 1.2s infinite;
         opacity: 0;
     }
 
     /* ── Subtitle + tagline ─────────────────────────── */
     .landing-subtitle {
-        text-align: center; color: #fdfcfc; font-size: 1rem;
-        font-weight: 400; margin-bottom: 0.1rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
-        animation: landFadeUp 0.5s ease-out 0.2s forwards;
+        text-align: center; color: #bbb; font-size: 1.05rem;
+        font-weight: 500; margin-bottom: 0.1rem;
+        animation: landFadeUp 0.7s ease-out 0.3s forwards;
         opacity: 0;
     }
     .landing-tagline {
-        text-align: center; color: #9a9898; font-size: 0.88rem;
+        text-align: center; color: #555; font-size: 0.82rem;
         margin-bottom: 2rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
-        animation: landFadeUp 0.5s ease-out 0.3s forwards;
+        animation: landFadeUp 0.7s ease-out 0.45s forwards;
         opacity: 0;
     }
 
-    /* ── Feature list (flat text — no cards) ────────── */
+    /* ── Feature cards ──────────────────────────────── */
     .feature-row {
-        display: flex; gap: 1.5rem; margin-bottom: 2rem;
-        flex-direction: column;
+        display: flex; gap: 1rem; margin-bottom: 2rem;
     }
     .feature-card {
         flex: 1;
-        background: transparent;
-        border: none;
-        border-top: 1px solid rgba(15, 0, 0, 0.12);
-        border-radius: 0;
-        padding: 1rem 0;
-        text-align: left;
+        background: rgba(22, 22, 22, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 18px;
+        padding: 1.6rem 1.1rem 1.4rem;
+        text-align: center;
         opacity: 0;
-        animation: landFadeUp 0.5s ease-out forwards;
-        transition: none;
+        animation: landFadeUp 0.65s ease-out forwards;
+        transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1),
+                    border-color 0.35s ease,
+                    box-shadow 0.35s ease;
     }
-    .feature-card:nth-child(1) { animation-delay: 0.4s; }
-    .feature-card:nth-child(2) { animation-delay: 0.5s; }
-    .feature-card:nth-child(3) { animation-delay: 0.6s; }
+    .feature-card:nth-child(1) { animation-delay: 0.5s; }
+    .feature-card:nth-child(2) { animation-delay: 0.65s; }
+    .feature-card:nth-child(3) { animation-delay: 0.8s; }
     .feature-card:hover {
-        transform: none;
-        border-color: rgba(15, 0, 0, 0.12);
-        box-shadow: none;
+        transform: translateY(-6px);
+        border-color: rgba(255, 107, 43, 0.35);
+        box-shadow: 0 12px 36px rgba(255, 107, 43, 0.08),
+                    0 0 0 1px rgba(255, 107, 43, 0.10);
     }
     .feature-icon {
-        font-size: 1.2rem; margin-right: 0.6rem;
+        font-size: 2rem; margin-bottom: 0.7rem;
         display: inline-block;
-        animation: none;
+        animation: floatIcon 3s ease-in-out infinite;
     }
+    .feature-card:nth-child(1) .feature-icon { animation-delay: 0s; }
+    .feature-card:nth-child(2) .feature-icon { animation-delay: 0.5s; }
+    .feature-card:nth-child(3) .feature-icon { animation-delay: 1s; }
     .feature-name {
-        color: #fdfcfc; font-size: 1rem; font-weight: 700;
-        margin-bottom: 0.3rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
+        color: #eee; font-size: 0.9rem; font-weight: 700;
+        margin-bottom: 0.4rem;
     }
     .feature-desc {
-        color: #9a9898; font-size: 0.88rem; line-height: 1.5;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
+        color: #777; font-size: 0.73rem; line-height: 1.5;
     }
 
-    /* ── How it works (flat text) ───────────────────── */
+    /* ── How it works ───────────────────────────────── */
     .how-section {
-        background: transparent;
-        border: none;
-        border-top: 1px solid rgba(15, 0, 0, 0.12);
-        border-bottom: 1px solid rgba(15, 0, 0, 0.12);
-        border-radius: 0;
-        padding: 1.5rem 0;
+        background: rgba(22, 22, 22, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        border-radius: 18px;
+        padding: 1.6rem 1.8rem 1.4rem;
         margin-bottom: 2rem;
-        text-align: left;
+        text-align: center;
         opacity: 0;
-        animation: landFadeUp 0.5s ease-out 0.7s forwards;
+        animation: landFadeUp 0.7s ease-out 0.95s forwards;
     }
     .how-label {
-        color: #9a9898; font-size: 0.82rem; font-weight: 500;
-        text-transform: none; letter-spacing: 0;
-        margin-bottom: 1rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
+        color: #555; font-size: 0.62rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.15em;
+        margin-bottom: 1.2rem;
     }
     .how-row {
         display: flex; align-items: flex-start;
-        justify-content: flex-start; gap: 0.5rem;
-        flex-wrap: wrap;
+        justify-content: center; gap: 0.3rem;
     }
-    .how-step { text-align: left; flex: 1; min-width: 160px; }
+    .how-step { text-align: center; flex: 1; }
     .how-num {
-        width: 28px; height: 28px; border-radius: 4px;
-        background: #201d1d;
-        border: 1px solid #646262;
-        color: #fdfcfc;
+        width: 34px; height: 34px; border-radius: 50%;
+        background: linear-gradient(135deg, #e63946 0%, #ff6b2b 100%);
+        color: white;
         display: inline-flex; align-items: center; justify-content: center;
-        font-size: 0.88rem; font-weight: 700;
+        font-size: 0.78rem; font-weight: 800;
         margin-bottom: 0.5rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
-        animation: landFadeUp 0.4s ease-out forwards;
+        animation: numPop 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards;
         opacity: 0;
     }
-    .how-step:nth-child(1) .how-num { animation-delay: 0.8s; }
-    .how-step:nth-child(3) .how-num { animation-delay: 0.9s; }
-    .how-step:nth-child(5) .how-num { animation-delay: 1.0s; }
+    .how-step:nth-child(1) .how-num { animation-delay: 1.1s; }
+    .how-step:nth-child(3) .how-num { animation-delay: 1.3s; }
+    .how-step:nth-child(5) .how-num { animation-delay: 1.5s; }
     .how-step-title {
-        color: #fdfcfc; font-size: 0.95rem; font-weight: 700;
+        color: #eee; font-size: 0.84rem; font-weight: 700;
         margin-bottom: 0.2rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
     }
-    .how-step-desc {
-        color: #9a9898; font-size: 0.82rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
-    }
+    .how-step-desc { color: #666; font-size: 0.68rem; }
     .how-arrow {
-        color: #9a9898; font-size: 1rem;
-        padding-top: 0.2rem;
-        opacity: 1;
-        animation: none;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
+        color: #444; font-size: 1.1rem;
+        padding-top: 0.35rem;
+        opacity: 0;
+        animation: drawArrow 0.4s ease-out forwards;
     }
+    .how-arrow:nth-of-type(1) { animation-delay: 1.25s; }
+    .how-arrow:nth-of-type(2) { animation-delay: 1.45s; }
 
     /* ── Stats bar ──────────────────────────────────── */
     .stats-row {
-        display: flex; justify-content: space-between;
+        display: flex; justify-content: space-around;
         margin-bottom: 2rem; padding: 0.3rem 0;
-        gap: 1rem;
     }
     .stat-item {
-        text-align: left;
+        text-align: center;
         opacity: 0;
-        animation: landFadeUp 0.4s ease-out forwards;
+        animation: landScaleIn 0.5s ease-out forwards;
     }
-    .stat-item:nth-child(1) { animation-delay: 1.1s; }
-    .stat-item:nth-child(2) { animation-delay: 1.15s; }
-    .stat-item:nth-child(3) { animation-delay: 1.2s; }
-    .stat-item:nth-child(4) { animation-delay: 1.25s; }
+    .stat-item:nth-child(1) { animation-delay: 1.5s; }
+    .stat-item:nth-child(2) { animation-delay: 1.6s; }
+    .stat-item:nth-child(3) { animation-delay: 1.7s; }
+    .stat-item:nth-child(4) { animation-delay: 1.8s; }
     .stat-num {
-        color: #fdfcfc; font-size: 1.5rem; font-weight: 700;
-        font-style: normal; line-height: 1.2;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
+        color: #ff6b2b; font-size: 1.6rem; font-weight: 900;
+        font-style: italic; line-height: 1.2;
     }
     .stat-label {
-        color: #9a9898; font-size: 0.82rem; font-weight: 400;
-        text-transform: none; letter-spacing: 0;
-        margin-top: 0.2rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
+        color: #555; font-size: 0.58rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        margin-top: 0.15rem;
     }
 
     /* ── CTA card ───────────────────────────────────── */
     .cta-card {
-        background: transparent;
-        border: 1px solid rgba(15, 0, 0, 0.12);
-        border-radius: 4px;
-        padding: 1.2rem 1.2rem;
-        text-align: left;
+        background: rgba(22, 22, 22, 0.65);
+        border: 1px solid rgba(255, 107, 43, 0.08);
+        border-radius: 18px;
+        padding: 1.6rem 1.5rem;
+        text-align: center;
         margin-bottom: 1rem;
         opacity: 0;
-        animation: landFadeUp 0.5s ease-out 1.3s forwards;
+        animation: landFadeUp 0.7s ease-out 1.9s forwards;
     }
     .cta-title {
-        color: #fdfcfc; font-size: 1rem; font-weight: 700;
+        color: #eee; font-size: 1.1rem; font-weight: 700;
         margin-bottom: 0.3rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
     }
-    .cta-desc {
-        color: #9a9898; font-size: 0.88rem;
-        font-family: 'Berkeley Mono','IBM Plex Mono',ui-monospace,monospace;
-    }
+    .cta-desc { color: #666; font-size: 0.8rem; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2175,10 +2170,10 @@ if _is_fresh_session:
 else:
     st.markdown(
         '<div style="padding:0.5rem 0 0.25rem 0;">'
-        '<span style="font-size:1.4rem;font-weight:700;color:#fdfcfc;'
-        'font-family:\'Berkeley Mono\',\'IBM Plex Mono\',ui-monospace,monospace;'
-        'letter-spacing:-0.01em;">'
-        'FITGEN.AI</span></div>',
+        '<span style="font-size:1.4rem;font-weight:800;'
+        'background:linear-gradient(135deg,#ff6b2b,#e63946);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;">'
+        '🔥 FITGEN.AI</span></div>',
         unsafe_allow_html=True,
     )
 
@@ -2188,13 +2183,12 @@ with st.sidebar:
     # ── Branding ───────────────────────────────────────────────
     st.markdown(
         '<div style="text-align:center;padding:0.5rem 0 1rem 0;">'
-        '<span style="font-size:1.6rem;font-weight:700;color:#fdfcfc;'
-        'font-family:\'Berkeley Mono\',\'IBM Plex Mono\',ui-monospace,monospace;'
-        'letter-spacing:-0.01em;">'
-        'FITGEN.AI</span><br>'
-        '<span style="color:#6e6e73;font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;'
-        'font-family:\'Berkeley Mono\',\'IBM Plex Mono\',ui-monospace,monospace;">'
-        'AI Fitness Coach</span></div>',
+        '<span style="font-size:1.6rem;font-weight:900;'
+        'background:linear-gradient(135deg,#ff6b2b,#e63946);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;">'
+        '🔥 FITGEN.AI</span><br>'
+        '<span style="color:#666;font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;">'
+        'AI-Powered Fitness Coach</span></div>',
         unsafe_allow_html=True,
     )
     st.divider()
@@ -2341,13 +2335,13 @@ with st.sidebar:
     for _s_key, _s_label in _STAGES:
         if _is_complete or _s_key in _completed or any(_s_key in c for c in _completed):
             _dot = "progress-dot-done"
-            _style = "color:#30d158;"
+            _style = "color:#2ecc71;"
         elif _s_key == _step or _s_key in _step:
             _dot = "progress-dot-active"
-            _style = "color:#007aff;font-weight:600;"
+            _style = "color:#ff6b2b;font-weight:600;"
         else:
             _dot = "progress-dot-pending"
-            _style = "color:#6e6e73;"
+            _style = "color:#666;"
         st.markdown(
             f'<div class="progress-stage">'
             f'<span class="progress-dot {_dot}"></span>'
@@ -2874,10 +2868,11 @@ if prompt:
         tool_direct_reply = False
         _form_will_render = False   # suppress display when form takes over
         _tool_structured_data: dict = {}  # macros/hydration from tool response
-        # Multi-tool support: when the router dispatches "both" (diet +
-        # workout in one turn), we receive multiple ToolMessages. Track
-        # each tool_call_id → its parsed assistant_message so we can
-        # stitch them into a single combined response at the end.
+
+        # Multi-tool cross-domain tracking. When router dispatches both
+        # diet_tool and workout_tool in the same turn (e.g. "show my diet
+        # and workout plan"), we receive one ToolMessage per tool. Stitch
+        # them into one response grouped by tool label.
         _tool_call_map: dict[str, str] = {}   # call_id → tool_name
         _tool_responses: dict[str, str] = {}  # call_id → assistant_message
         _is_multi_tool = False
@@ -2965,33 +2960,28 @@ if prompt:
                 if event.get("messages"):
                     last_msg = event["messages"][-1]
 
-                    # Detect @tool call intent (latest message only)
+                    # Detect @tool call intent (latest message only).
+                    # Handles both single- and multi-tool dispatch.
                     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls and not tool_used:
                         _calls = last_msg.tool_calls
+                        for _c in _calls:
+                            _tool_call_map[_c.get("id", "")] = _c["name"]
                         _is_multi_tool = len(_calls) > 1
-                        # Record call_id → tool_name for stitching later
-                        for _tc in _calls:
-                            _cid = _tc.get("id") or ""
-                            _cname = _tc.get("name") or ""
-                            if _cid and _cname:
-                                _tool_call_map[_cid] = _cname
                         tool_used = _calls[0]["name"]
                         if _is_multi_tool:
-                            _status_phase = "tool"
-                            _tool_names = [c["name"] for c in _calls]
-                            _labels = [
+                            _labels = " + ".join(
                                 TOOL_LABELS.get(n, ("Specialist", "", "#333"))[0]
-                                for n in _tool_names
-                            ]
-                            status.update(label=f"Consulting {' + '.join(_labels)}…")
-                            # Render both badges side-by-side
+                                for n in (_c["name"] for _c in _calls)
+                            )
+                            _status_phase = "tool"
+                            status.update(label=f"Consulting {_labels}…")
                             badge_placeholder.markdown(
-                                " ".join(_badge(n) for n in _tool_names),
+                                " ".join(_badge(_c["name"]) for _c in _calls),
                                 unsafe_allow_html=True,
                             )
                             _ui_logger.info(
-                                "[Turn %s] Multi-tool dispatch: %s",
-                                turn_id, _tool_names,
+                                "[Turn %s] Multi-tool dispatch=%s",
+                                turn_id, [_c["name"] for _c in _calls],
                             )
                         else:
                             tool_label, _, _ = TOOL_LABELS.get(tool_used, ("Specialist", "", "#333"))
@@ -3021,27 +3011,23 @@ if prompt:
                             assistant_message = parsed.get("assistant_message")
                             if assistant_message:
                                 if _is_multi_tool:
-                                    # Record by call_id and stitch on every update
                                     _cid = getattr(last_msg, "tool_call_id", "") or ""
                                     if _cid:
                                         _tool_responses[_cid] = assistant_message
-                                    # Stitch in dispatch order so sections are
-                                    # stable (diet_tool first, workout_tool second)
                                     _sections: list[str] = []
                                     for _cid_k, _tname in _tool_call_map.items():
                                         _resp = _tool_responses.get(_cid_k)
                                         if not _resp:
                                             continue
                                         _tlabel, _, _ = TOOL_LABELS.get(
-                                            _tname, ("Specialist", "", "#333"),
+                                            _tname, ("Specialist", "", "#333")
                                         )
                                         _sections.append(f"### {_tlabel}\n\n{_resp}")
                                     if _sections:
                                         response_content = "\n\n---\n\n".join(_sections)
                                         tool_direct_reply = True
                                         _ui_logger.debug(
-                                            "[Turn %s] Multi-tool stitched response "
-                                            "(tools=%d, chars=%d)",
+                                            "[Turn %s] Multi-tool stitched (tools=%d, chars=%d)",
                                             turn_id, len(_tool_responses),
                                             len(response_content),
                                         )
