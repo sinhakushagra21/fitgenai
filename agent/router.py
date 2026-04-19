@@ -57,12 +57,10 @@ logger = logging.getLogger("fitgen.router")
 try:
     from agent.tools import diet_tool as _diet_tool_obj
     from agent.tools import workout_tool as _workout_tool_obj
-    from agent.tools import rag_query_tool as _rag_tool_obj
 
     _TOOL_DESCRIPTIONS: dict[str, str] = {
         "diet_tool": (getattr(_diet_tool_obj, "description", "") or "").strip(),
         "workout_tool": (getattr(_workout_tool_obj, "description", "") or "").strip(),
-        "rag_query_tool": (getattr(_rag_tool_obj, "description", "") or "").strip(),
     }
     logger.info(
         "[Router] Loaded tool descriptions: %s",
@@ -73,7 +71,6 @@ except Exception as _exc:  # noqa: BLE001
     _TOOL_DESCRIPTIONS = {
         "diet_tool": "Diet, meal plans, nutrition, foods, macros, calories.",
         "workout_tool": "Workout and exercise plans, training schedules, reps, sets, body parts, lifts.",
-        "rag_query_tool": "General evidence-based fitness/nutrition knowledge questions.",
     }
 
 # ── Terminal steps (workflow is "done") ──────────────────────────────
@@ -94,7 +91,6 @@ _TERMINAL_STEPS = frozenset({
 _VALID_ROUTES = frozenset({
     "diet_tool",
     "workout_tool",
-    "rag_query_tool",
     "direct",
 })
 
@@ -122,9 +118,6 @@ Here are the specialist tools available, with their own descriptions:
 
 [workout_tool]
 {workout_desc}
-
-[rag_query_tool]
-{rag_desc}
 
 Choose EXACTLY ONE label for the user turn:
 
@@ -171,7 +164,6 @@ def _classify_active_turn(query: str, domain: str, step: str | None) -> str:
             step=step or "(none)",
             diet_desc=_TOOL_DESCRIPTIONS.get("diet_tool", ""),
             workout_desc=_TOOL_DESCRIPTIONS.get("workout_tool", ""),
-            rag_desc=_TOOL_DESCRIPTIONS.get("rag_query_tool", ""),
         )
         resp = safe_llm_call(
             llm,
@@ -211,12 +203,14 @@ diet/meal/nutrition plan, is asking about their existing diet plan, \
 or has a nutrition-specific question.
 - "workout_tool" — User wants to create, modify, view, or delete a \
 workout/exercise/training plan, is asking about their existing \
-workout plan, or has an exercise-specific question.
-- "rag_query_tool" — General fitness/nutrition KNOWLEDGE question \
-that needs evidence-based, cited sources (e.g. "Is creatine safe?", \
-"What are the benefits of HIIT?"). NOT a plan request.
+workout plan, or has an exercise-specific question (including general \
+knowledge questions about exercise, training, or body parts).
 - "direct" — Greetings ("hi", "hello"), out-of-scope questions \
 (politics, coding, math), or meta questions about the assistant.
+
+Note: General nutrition knowledge questions (e.g. "is creatine safe?") \
+should map to "diet_tool"; general training knowledge questions \
+(e.g. "benefits of HIIT?") should map to "workout_tool".
 
 Respond with ONLY the category name. No explanation, no quotes, \
 no punctuation."""
@@ -277,7 +271,7 @@ def _last_human_text(messages: list) -> str:
 def _classify_intent(query: str) -> str:
     """Use a focused fast-LLM call to classify user intent.
 
-    Returns one of: "diet_tool", "workout_tool", "rag_query_tool", "direct".
+    Returns one of: "diet_tool", "workout_tool", "direct".
     Falls back to "direct" on any error.
     """
     try:
@@ -414,7 +408,7 @@ def router_node(state: AgentState) -> dict:
        (deterministic).  If a domain switch is detected via keyword
        heuristic, route to the other domain's tool instead.
     3. **No active workflow** → use a focused LLM classifier to decide:
-       ``diet_tool`` | ``workout_tool`` | ``rag_query_tool`` | ``direct``.
+       ``diet_tool`` | ``workout_tool`` | ``direct``.
     4. **"direct" route** → generate a direct LLM response for greetings
        and out-of-scope queries.
     """
@@ -526,7 +520,7 @@ def router_node(state: AgentState) -> dict:
         query_preview=user_query[:80],
     )
 
-    if route in ("diet_tool", "workout_tool", "rag_query_tool"):
+    if route in ("diet_tool", "workout_tool"):
         return _emit_tool_call(route, user_query)
 
     # ── 4. Direct response ──────────────────────────────────────────

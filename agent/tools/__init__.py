@@ -11,14 +11,16 @@ To add a new tool:
 
 from agent.tools.diet_tool import diet_tool
 from agent.tools.workout_tool import workout_tool
-from agent.rag.rag_tool import rag_query_tool
 
 # ── Tool registry ─────────────────────────────────────────────────
 # Add new tools to this list — no other file needs to change.
+# NOTE: rag_query_tool (knowledge-base retrieval) is deactivated — RAG
+# now lives exclusively inside diet_tool and workout_tool as Personal RAG
+# over the user's own saved plan chunks + memory. The module stays on
+# disk at agent/rag/rag_tool.py in case it needs to be revived later.
 ALL_TOOLS = [
     workout_tool,
     diet_tool,
-    rag_query_tool,
 ]
 
-__all__ = ["ALL_TOOLS", "workout_tool", "diet_tool", "rag_query_tool"]
+__all__ = ["ALL_TOOLS", "workout_tool", "diet_tool"]

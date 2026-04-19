@@ -238,14 +238,6 @@ class TestRouterNode:
         result = router_node(state)
         assert result["messages"][0].tool_calls[0]["name"] == "diet_tool"
 
-    @patch("agent.router._classify_intent", return_value="rag_query_tool")
-    def test_no_workflow_classifies_rag(self, mock_classify):
-        state = self._state(
-            messages=[HumanMessage(content="is creatine safe?")],
-        )
-        result = router_node(state)
-        assert result["messages"][0].tool_calls[0]["name"] == "rag_query_tool"
-
     @patch("agent.router._generate_direct_response")
     @patch("agent.router._classify_intent", return_value="direct")
     def test_no_workflow_classifies_direct(self, mock_classify, mock_direct):
