@@ -141,6 +141,13 @@ class UserRepository:
 
         cls._col().update_one({"email": email}, {"$set": set_fields})
 
+        # Best-effort Personal-RAG profile re-index. Never raises.
+        try:
+            from agent.rag.personal.indexer import index_profile
+            index_profile(email)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[user_repo] RAG profile reindex failed: %s", exc)
+
     # ── Delete ───────────────────────────────────────────────────
 
     @classmethod

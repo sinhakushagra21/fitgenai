@@ -291,6 +291,9 @@ GENERAL CLASSIFICATION (when no critical rule applies)
 • Sync to Google Fit → "sync_{domain}_to_google_fit"
 • Sync to BOTH / plain "yes" at sync prompt → "sync_{domain}_to_both"
 • Skip / decline sync ("done", "no", "skip") → "skip_sync_{domain}"
+• Restore an archived/old plan — e.g. "restore vegan", "bring back my
+  old plan", "reactivate my previous {domain} plan", "make my vegan
+  plan active again" → "restore_{domain}_plan"
 • General knowledge question NOT about user's plan, small talk → "general_{domain}_query"
 """
 
@@ -436,6 +439,8 @@ def answer_followup_question(
     profile: dict[str, Any],
     plan_text: str,
     system_prompt: str,
+    *,
+    context: str = "",
 ) -> str:
     """Answer a follow-up question about the plan without regenerating it.
 
@@ -445,24 +450,45 @@ def answer_followup_question(
         domain: "diet" or "workout".
         query: The user's question.
         profile: Current user profile dict.
-        plan_text: The current plan (JSON string or markdown).
+        plan_text: The current plan (JSON string or markdown). Used as a
+            fallback when ``context`` is empty.
         system_prompt: The domain system prompt (e.g. DIET_PROMPTS["few_shot"]).
+        context: Personal-RAG retrieved context (pre-formatted). If
+            non-empty, the LLM is instructed to answer using the
+            retrieved context ONLY — grounded generation.
 
     Returns:
         The LLM's answer as a string.
     """
     llm = ChatOpenAI(model=_PLAN_MODEL, temperature=0.4)
-    prompt = (
-        f"The user has an active {domain} plan. Here is their profile:\n"
-        f"{json.dumps(profile, indent=2)}\n\n"
-        f"Here is their current plan:\n{plan_text}\n\n"
-        f"The user is asking a follow-up question about this plan:\n"
-        f'"{query}"\n\n'
-        "Answer their question directly and concisely. Stay within the "
-        "context of their plan and profile. Do NOT regenerate the full plan. "
-        "Just answer the specific question. "
-        "NEVER use LaTeX (no \\text{}, \\textbf{}, $...$). Use plain markdown."
-    )
+
+    if context and context.strip():
+        prompt = (
+            f"The user has an active {domain} plan. Here is their profile:\n"
+            f"{json.dumps(profile, indent=2)}\n\n"
+            f"Here is RETRIEVED CONTEXT from their plan and profile memory:\n"
+            f"---\n{context}\n---\n\n"
+            f"The user is asking:\n\"{query}\"\n\n"
+            "Answer ONLY from the CONTEXT above and the profile. "
+            "If the context does not contain enough information to answer, "
+            "say so honestly and suggest what the user could ask for "
+            "instead. Do NOT regenerate the full plan. Keep the answer "
+            "focused and concise. "
+            "NEVER use LaTeX (no \\text{}, \\textbf{}, $...$). "
+            "Use plain markdown."
+        )
+    else:
+        prompt = (
+            f"The user has an active {domain} plan. Here is their profile:\n"
+            f"{json.dumps(profile, indent=2)}\n\n"
+            f"Here is their current plan:\n{plan_text}\n\n"
+            f"The user is asking a follow-up question about this plan:\n"
+            f'"{query}"\n\n'
+            "Answer their question directly and concisely. Stay within the "
+            "context of their plan and profile. Do NOT regenerate the full plan. "
+            "Just answer the specific question. "
+            "NEVER use LaTeX (no \\text{}, \\textbf{}, $...$). Use plain markdown."
+        )
     try:
         resp = llm.invoke([
             SystemMessage(content=system_prompt),
@@ -511,11 +537,23 @@ def answer_plan_question(
     domain: str,
     plan_text: str,
     question: str,
+    *,
+    context: str = "",
 ) -> str:
     """Use FAST_MODEL to intelligently answer any query about a stored plan.
 
     The LLM decides whether to return the full plan or just the relevant
     section based on the user's question — no keyword matching needed.
+
+    Args:
+        domain: "diet" or "workout".
+        plan_text: The full plan markdown (authoritative source).
+        question: The user's question.
+        context: Optional Personal-RAG retrieved chunks, pre-formatted.
+            When supplied, the LLM is told these are focused passages
+            ranked for the current question — it will prefer them for
+            narrow queries but fall back to the full plan when the user
+            asks to see everything.
     """
     from datetime import datetime, timedelta
 
@@ -545,10 +583,23 @@ def answer_plan_question(
             f"{today.strftime('%A, %B %d')}. Use plain markdown only."
         )
 
+    context_block = ""
+    if context and context.strip():
+        context_block = (
+            f"## Focused context (retrieved passages ranked for this question):\n\n"
+            f"{context}\n\n"
+            f"---\n\n"
+            "When the user asks a narrow question (a specific day, meal, "
+            "or exercise), prefer the focused context above — it is "
+            "ranked for relevance. When the user asks to see their full "
+            "plan, use the complete plan below instead.\n\n"
+        )
+
     user_msg = (
         f"## User's {domain} plan:\n\n"
         f"{plan_text}\n\n"
         f"---\n\n"
+        f"{context_block}"
         f"## User's question:\n{question}"
     )
 

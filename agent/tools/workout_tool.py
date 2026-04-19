@@ -864,13 +864,35 @@ def _handle_update_workout(query: str, ctx: WorkoutSessionContext) -> str:
 
 
 def _handle_get_workout(query: str, ctx: WorkoutSessionContext) -> str:
-    """Handle get_workout intent — fetch workout plan from DB, let LLM answer."""
-    # Always fetch the workout plan from MongoDB — single source of truth.
-    _plan = ""
+    """Handle get_workout intent — resolve which plan, then let the LLM answer.
+
+    Model C: if the resolver returns an archived plan (matched on a
+    descriptor like "strength" / "ppl"), we answer from it and prompt
+    the user to ``restore`` it to active.
+    """
+    resolved = None
     if ctx.user_id:
+        try:
+            from agent.rag.personal.plan_resolver import resolve_plan
+            resolved = resolve_plan(ctx.user_id, query, plan_type="workout")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[workout_tool] plan_resolver failed: %s", exc)
+
+    _plan = ""
+    _plan_id = None
+    _is_archived = False
+    _match_reason = ""
+    if resolved:
+        p = resolved["plan"]
+        _plan = p.get("plan_markdown", "") or ""
+        _plan_id = p.get("_id")
+        _is_archived = bool(resolved.get("is_archived"))
+        _match_reason = str(resolved.get("match_reason") or "")
+    elif ctx.user_id:
         latest = WorkoutPlanRepository.find_latest_by_user(ctx.user_id)
-        if latest and latest.get("plan_markdown"):
-            _plan = latest["plan_markdown"]
+        if latest:
+            _plan = latest.get("plan_markdown", "") or ""
+            _plan_id = latest.get("_id")
 
     if not _plan:
         return _build(
@@ -886,7 +908,40 @@ def _handle_get_workout(query: str, ctx: WorkoutSessionContext) -> str:
     ctx.completed_steps = []
     ctx.pending_question = None
 
-    answer = answer_plan_question(_DOMAIN, _plan, query)
+    retrieved_context = ""
+    if ctx.user_id and not _is_archived:
+        try:
+            from agent.rag.personal.retriever import PersonalRAG
+            chunks = PersonalRAG.retrieve(
+                user_id=ctx.user_id, query=query,
+                plan_type="workout", top_k=5,
+            )
+            if chunks:
+                retrieved_context = "\n\n".join(c.render() for c in chunks)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[workout_tool] RAG retrieve failed: %s", exc)
+
+    answer = answer_plan_question(
+        _DOMAIN, _plan, query, context=retrieved_context,
+    )
+
+    if _is_archived and _plan_id is not None:
+        ctx.workflow = {
+            "intent": "get_workout",
+            "domain": _DOMAIN,
+            "pending_restore_plan_id": str(_plan_id),
+        }
+        ctx.step_completed = "archived_plan_surfaced"
+        ctx.pending_question = (
+            "Reply **restore** to make this plan active again."
+        )
+        suffix = (
+            "\n\n_📌 This is an **archived** plan "
+            f"(match: {_match_reason or 'descriptor'}). "
+            "Reply **restore** to make it your active workout plan again._"
+        )
+        answer = f"{answer}{suffix}"
+
     return _build(answer, ctx)
 
 
@@ -1086,13 +1141,109 @@ def _handle_general_workout_query(
     if not _plan and ctx.workflow.get("domain") == "workout":
         _plan = ctx.plan_text  # fallback to session only if same domain
 
+    # Personal RAG — fetch top-k chunks from the user's own plan + memory.
+    retrieved_context = ""
+    if ctx.user_id:
+        try:
+            from agent.rag.personal.retriever import PersonalRAG
+            chunks = PersonalRAG.retrieve(
+                user_id=ctx.user_id, query=query,
+                plan_type="workout", top_k=5,
+            )
+            if chunks:
+                retrieved_context = "\n\n".join(c.render() for c in chunks)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[workout_tool] RAG retrieve failed: %s", exc)
+
     answer = answer_followup_question(
         _DOMAIN, query, ctx.profile, _plan, ctx.system_prompt,
+        context=retrieved_context,
     )
     return _build(answer, ctx)
 
 
 # ── Register intent handlers ─────────────────────────────────────────
+
+def _handle_restore_workout_plan(
+    query: str, ctx: WorkoutSessionContext,
+) -> str:
+    """Handle restore_workout_plan — reactivate an archived plan.
+
+    Mirrors ``_handle_restore_diet_plan`` in diet_tool: picks a target
+    plan (from pending_restore_plan_id or the PlanResolver), archives
+    the current active plan, flips the target to confirmed, and re-
+    indexes chunks.
+    """
+    target_id: str | None = ctx.workflow.get("pending_restore_plan_id")
+    target_plan: dict[str, Any] | None = None
+
+    if target_id:
+        target_plan = WorkoutPlanRepository.find_by_id(target_id)
+
+    if target_plan is None and ctx.user_id:
+        try:
+            from agent.rag.personal.plan_resolver import resolve_plan
+            resolved = resolve_plan(ctx.user_id, query, plan_type="workout")
+            if resolved and resolved.get("is_archived"):
+                target_plan = resolved["plan"]
+                target_id = str(target_plan["_id"])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[workout_tool] restore resolver failed: %s", exc)
+
+    if target_plan is None:
+        return _build(
+            "I couldn't find an archived workout plan to restore. "
+            "Ask me to **get my old push-pull-legs plan** (or similar) "
+            "first, then reply **restore**.",
+            ctx,
+        )
+
+    try:
+        _oid = target_plan["_id"]
+        if ctx.user_id:
+            active = WorkoutPlanRepository.find_latest_by_user(
+                ctx.user_id, status="confirmed",
+            ) or WorkoutPlanRepository.find_latest_by_user(
+                ctx.user_id, status="draft",
+            )
+            if active and active["_id"] != _oid:
+                WorkoutPlanRepository.archive(active["_id"])
+
+        WorkoutPlanRepository.update_plan(_oid, status="confirmed")
+        try:
+            from agent.db.repositories.plan_chunks_repo import (
+                PlanChunksRepository,
+            )
+            PlanChunksRepository.reactivate_by_plan(_oid, status="confirmed")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[workout_tool] reactivate chunks failed: %s", exc)
+        logger.info("[WorkoutFlow] Plan restored: plan_id=%s", _oid)
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(exc, "workout_tool._handle_restore_workout_plan",
+                         level="ERROR")
+        return _build(
+            "Sorry — I couldn't restore that plan right now. "
+            "Please try again.",
+            ctx,
+        )
+
+    plan_name = target_plan.get("name") or "your workout plan"
+    ctx.plan_text = ""
+    ctx.workflow = {
+        "intent": "restore_workout_plan",
+        "domain": _DOMAIN,
+        "plan_id": str(_oid),
+    }
+    ctx.step_completed = "workout_confirmed"
+    ctx.pending_question = None
+
+    return _build(
+        f"✅ Restored **{plan_name}** as your active workout plan. "
+        "Ask me anything about it, or say **sync to calendar** / "
+        "**sync to fit** to push it out.",
+        ctx,
+    )
+
 
 _INTENT_HANDLERS.update({
     "create_workout": _handle_create_workout,
@@ -1105,4 +1256,5 @@ _INTENT_HANDLERS.update({
     "sync_workout_to_both": _handle_sync_to_both,
     "skip_sync_workout": _handle_skip_sync_workout,
     "general_workout_query": _handle_general_workout_query,
+    "restore_workout_plan": _handle_restore_workout_plan,
 })

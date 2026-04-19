@@ -19,6 +19,61 @@ from agent.db.models import PlanDocument
 logger = logging.getLogger("fitgen.db.diet_plan_repo")
 
 
+def _reindex(plan_id: Any) -> None:
+    """Best-effort Personal-RAG re-index hook. Never raises."""
+    try:
+        from agent.rag.personal.indexer import index_plan
+        index_plan(str(plan_id), plan_type="diet")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[diet_plan_repo] RAG reindex failed: %s", exc)
+
+
+def _archive_siblings(
+    user_id: ObjectId, *, except_plan_id: ObjectId | None = None,
+) -> int:
+    """Archive every non-archived diet plan for a user.
+
+    One-active-plan-per-domain is FITGEN's product invariant: a new
+    ``create`` or ``confirm`` archives the previous plan (both its
+    ``diet_plans`` doc and its ``plan_chunks`` vector rows) so RAG
+    retrieval only sees the current plan.
+    """
+    from agent.db.mongo import get_db
+    from datetime import datetime, timezone
+
+    q: dict[str, Any] = {
+        "user_id": user_id,
+        "status": {"$in": ["draft", "confirmed"]},
+    }
+    if except_plan_id is not None:
+        q["_id"] = {"$ne": except_plan_id}
+
+    sibling_ids = [p["_id"] for p in get_db().diet_plans.find(q, {"_id": 1})]
+    if not sibling_ids:
+        return 0
+
+    # Update the diet_plans docs in one shot.
+    get_db().diet_plans.update_many(
+        {"_id": {"$in": sibling_ids}},
+        {"$set": {"status": "archived",
+                  "updated_at": datetime.now(timezone.utc)}},
+    )
+
+    # Archive their plan_chunks too (keeps RAG in sync).
+    try:
+        from agent.db.repositories.plan_chunks_repo import PlanChunksRepository
+        for pid in sibling_ids:
+            PlanChunksRepository.archive_by_plan(pid)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[diet_plan_repo] sibling chunk archive failed: %s", exc)
+
+    logger.info(
+        "[diet_plan_repo] archived %d sibling diet plan(s) for user=%s",
+        len(sibling_ids), user_id,
+    )
+    return len(sibling_ids)
+
+
 class DietPlanRepository:
     """CRUD operations for the ``diet_plans`` collection."""
 
@@ -43,6 +98,13 @@ class DietPlanRepository:
         """Insert a new diet plan.  Returns the inserted ``_id``."""
         if isinstance(user_id, str):
             user_id = ObjectId(user_id)
+
+        # FITGEN product invariant: one active diet plan per user.
+        # Archive any prior non-archived plans before inserting the new
+        # one so RAG retrieval (which filters on plan_status) only ever
+        # surfaces the current plan.
+        _archive_siblings(user_id)
+
         doc = PlanDocument(
             user_id=user_id,
             session_id=session_id,
@@ -54,6 +116,7 @@ class DietPlanRepository:
         )
         result = cls._col().insert_one(doc.model_dump())
         logger.info("Diet plan created: _id=%s user=%s name=%r", result.inserted_id, user_id, name)
+        _reindex(result.inserted_id)
         return result.inserted_id
 
     # ── Read ─────────────────────────────────────────────────────
@@ -138,6 +201,7 @@ class DietPlanRepository:
             {"_id": plan_id},
             {"$set": set_fields, "$inc": {"version": 1}},
         )
+        _reindex(plan_id)
 
     @classmethod
     def confirm(cls, plan_id: ObjectId | str) -> None:
@@ -148,6 +212,12 @@ class DietPlanRepository:
     def archive(cls, plan_id: ObjectId | str) -> None:
         """Archive a plan (soft delete)."""
         cls.update_plan(plan_id, status="archived")
+        # Also archive chunks in the vector collection.
+        try:
+            from agent.db.repositories.plan_chunks_repo import PlanChunksRepository
+            PlanChunksRepository.archive_by_plan(plan_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[diet_plan_repo] archive chunks failed: %s", exc)
 
     # ── Delete ───────────────────────────────────────────────────
 

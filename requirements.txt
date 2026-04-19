@@ -6,6 +6,8 @@ langgraph>=0.2.0
 openai>=1.0.0
 python-dotenv>=1.0.0
 streamlit>=1.35.0
+markdown>=3.6
+pdfkit>=1.0.0
 typing-extensions>=4.9.0
 
 # Google Calendar integration
@@ -36,3 +38,6 @@ pytest-cov>=5.0.0
 pytest-mock>=3.12.0
 mongomock>=4.1.0
 matplotlib>=3.8.0
+
+# Prompt Flow experiments
+promptflow>=1.18.0

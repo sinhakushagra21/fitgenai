@@ -935,13 +935,39 @@ def _handle_update_diet(query: str, ctx: DietSessionContext) -> str:
 
 
 def _handle_get_diet(query: str, ctx: DietSessionContext) -> str:
-    """Handle get_diet intent — fetch diet plan from DB, let LLM answer."""
-    # Always fetch the diet plan from MongoDB — single source of truth.
-    _plan = ""
+    """Handle get_diet intent — resolve which plan, then let the LLM answer.
+
+    Model C: user has at most one *active* diet plan, but archived plans
+    stay searchable by descriptor (vegan, keto, fat loss, …). The
+    ``PlanResolver`` picks the right one. If the match is archived, we
+    skip the RAG retrieval (its chunks live under ``plan_status='archived'``
+    and the retriever filters them out) and answer straight from the
+    loaded markdown — then nudge the user to ``restore`` it.
+    """
+    resolved = None
     if ctx.user_id:
+        try:
+            from agent.rag.personal.plan_resolver import resolve_plan
+            resolved = resolve_plan(ctx.user_id, query, plan_type="diet")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[diet_tool] plan_resolver failed: %s", exc)
+
+    # Fallback to latest active if resolver returned nothing.
+    _plan = ""
+    _plan_id = None
+    _is_archived = False
+    _match_reason = ""
+    if resolved:
+        p = resolved["plan"]
+        _plan = p.get("plan_markdown", "") or ""
+        _plan_id = p.get("_id")
+        _is_archived = bool(resolved.get("is_archived"))
+        _match_reason = str(resolved.get("match_reason") or "")
+    elif ctx.user_id:
         latest = DietPlanRepository.find_latest_by_user(ctx.user_id)
-        if latest and latest.get("plan_markdown"):
-            _plan = latest["plan_markdown"]
+        if latest:
+            _plan = latest.get("plan_markdown", "") or ""
+            _plan_id = latest.get("_id")
 
     if not _plan:
         return _build(
@@ -957,7 +983,43 @@ def _handle_get_diet(query: str, ctx: DietSessionContext) -> str:
     ctx.completed_steps = []
     ctx.pending_question = None
 
-    answer = answer_plan_question(_DOMAIN, _plan, query)
+    # Personal RAG — only applies to the active plan. Archived chunks
+    # are filtered out by ``vector_search`` so we skip the call.
+    retrieved_context = ""
+    if ctx.user_id and not _is_archived:
+        try:
+            from agent.rag.personal.retriever import PersonalRAG
+            chunks = PersonalRAG.retrieve(
+                user_id=ctx.user_id, query=query,
+                plan_type="diet", top_k=5,
+            )
+            if chunks:
+                retrieved_context = "\n\n".join(c.render() for c in chunks)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[diet_tool] RAG retrieve failed: %s", exc)
+
+    answer = answer_plan_question(
+        _DOMAIN, _plan, query, context=retrieved_context,
+    )
+
+    # If we surfaced an archived plan, stash its id and nudge the user.
+    if _is_archived and _plan_id is not None:
+        ctx.workflow = {
+            "intent": "get_diet",
+            "domain": _DOMAIN,
+            "pending_restore_plan_id": str(_plan_id),
+        }
+        ctx.step_completed = "archived_plan_surfaced"
+        ctx.pending_question = (
+            "Reply **restore** to make this plan active again."
+        )
+        suffix = (
+            "\n\n_📌 This is an **archived** plan "
+            f"(match: {_match_reason or 'descriptor'}). "
+            "Reply **restore** to make it your active diet plan again._"
+        )
+        answer = f"{answer}{suffix}"
+
     return _build(answer, ctx)
 
 
@@ -1200,12 +1262,115 @@ def _handle_general_diet_query(
     if not _plan and ctx.workflow.get("domain") == "diet":
         _plan = ctx.plan_text  # fallback to session only if same domain
 
+    # Personal RAG — fetch top-k chunks from the user's own plan + memory.
+    retrieved_context = ""
+    if ctx.user_id:
+        try:
+            from agent.rag.personal.retriever import PersonalRAG
+            chunks = PersonalRAG.retrieve(
+                user_id=ctx.user_id, query=query,
+                plan_type="diet", top_k=5,
+            )
+            if chunks:
+                retrieved_context = "\n\n".join(c.render() for c in chunks)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[diet_tool] RAG retrieve failed: %s", exc)
+
     answer = answer_followup_question(
         _DOMAIN, query, ctx.profile, _plan, ctx.system_prompt,
+        context=retrieved_context,
     )
 
     # Don't change step_completed — stay in current flow position
     return _build(answer, ctx)
+
+
+def _handle_restore_diet_plan(query: str, ctx: DietSessionContext) -> str:
+    """Handle restore_diet_plan — reactivate an archived plan.
+
+    Picks the plan via one of (in priority order):
+      1. ``ctx.workflow["pending_restore_plan_id"]`` — set by the
+         archived-plan nudge in ``_handle_get_diet``.
+      2. The ``PlanResolver`` run against the user's raw query (lets the
+         user say "restore my vegan plan" without a preceding ``get``).
+
+    Archives any other active sibling, flips this plan to ``confirmed``,
+    and re-indexes its chunks so RAG surfaces them again.
+    """
+    from bson import ObjectId
+
+    target_id: str | None = ctx.workflow.get("pending_restore_plan_id")
+    target_plan: dict[str, Any] | None = None
+
+    if target_id:
+        target_plan = DietPlanRepository.find_by_id(target_id)
+
+    if target_plan is None and ctx.user_id:
+        try:
+            from agent.rag.personal.plan_resolver import resolve_plan
+            resolved = resolve_plan(ctx.user_id, query, plan_type="diet")
+            if resolved and resolved.get("is_archived"):
+                target_plan = resolved["plan"]
+                target_id = str(target_plan["_id"])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[diet_tool] restore resolver failed: %s", exc)
+
+    if target_plan is None:
+        return _build(
+            "I couldn't find an archived diet plan to restore. "
+            "Ask me to **get my old vegan plan** (or similar) first, "
+            "then reply **restore**.",
+            ctx,
+        )
+
+    try:
+        _oid = target_plan["_id"]
+        # Archive the currently-active plan (if any other).
+        if ctx.user_id:
+            active = DietPlanRepository.find_latest_by_user(
+                ctx.user_id, status="confirmed",
+            ) or DietPlanRepository.find_latest_by_user(
+                ctx.user_id, status="draft",
+            )
+            if active and active["_id"] != _oid:
+                DietPlanRepository.archive(active["_id"])
+
+        # Flip the target back to confirmed + re-index chunks.
+        DietPlanRepository.update_plan(_oid, status="confirmed")
+        try:
+            from agent.db.repositories.plan_chunks_repo import (
+                PlanChunksRepository,
+            )
+            PlanChunksRepository.reactivate_by_plan(_oid, status="confirmed")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[diet_tool] reactivate chunks failed: %s", exc)
+        logger.info("[DietFlow] Plan restored: plan_id=%s", _oid)
+    except Exception as exc:  # noqa: BLE001
+        handle_exception(exc, "diet_tool._handle_restore_diet_plan",
+                         level="ERROR")
+        return _build(
+            "Sorry — I couldn't restore that plan right now. "
+            "Please try again.",
+            ctx,
+        )
+
+    # Reset workflow and load the restored plan into session.
+    plan_name = target_plan.get("name") or "your diet plan"
+    ctx.plan_text = ""
+    ctx.workflow = {
+        "intent": "restore_diet_plan",
+        "domain": _DOMAIN,
+        "plan_id": str(_oid),
+    }
+    ctx.step_completed = "diet_confirmed"
+    ctx.pending_question = None
+
+    return _build(
+        f"✅ Restored **{plan_name}** as your active diet plan. "
+        "Ask me anything about it, or say **sync to calendar** / "
+        "**sync to fit** to push it out.",
+        ctx,
+    )
 
 
 # ── Register intent handlers ─────────────────────────────────────────
@@ -1221,4 +1386,5 @@ _INTENT_HANDLERS.update({
     "sync_diet_to_both": _handle_sync_to_both,
     "skip_sync_diet": _handle_skip_sync_diet,
     "general_diet_query": _handle_general_diet_query,
+    "restore_diet_plan": _handle_restore_diet_plan,
 })

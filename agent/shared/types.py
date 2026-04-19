@@ -29,6 +29,7 @@ DietIntent = Literal[
     "sync_diet_to_both",
     "skip_sync_diet",
     "general_diet_query",
+    "restore_diet_plan",
 ]
 
 WorkoutIntent = Literal[
@@ -42,6 +43,7 @@ WorkoutIntent = Literal[
     "sync_workout_to_both",
     "skip_sync_workout",
     "general_workout_query",
+    "restore_workout_plan",
 ]
 
 # ---------------------------------------------------------------------------

@@ -89,4 +89,27 @@ def init_indexes() -> None:
     db.feedback.create_index("session_id")
     db.feedback.create_index([("user_id", 1), ("created_at", -1)])
 
+    # plan_chunks (Personal RAG)
+    # Vector index itself is created in Atlas console (index name:
+    # "plan_chunks_vec"). These are the supporting non-vector indexes
+    # used for filtering, idempotency, and admin queries.
+    db.plan_chunks.create_index(
+        [("user_id", 1), ("plan_type", 1), ("plan_status", 1),
+         ("created_at", -1)]
+    )
+    db.plan_chunks.create_index([("plan_id", 1), ("plan_version", 1)])
+    db.plan_chunks.create_index(
+        [("plan_id", 1), ("source_content_hash", 1)], unique=True
+    )
+
+    # user_memory (Personal RAG)
+    # Vector index name in Atlas: "user_memory_vec".
+    db.user_memory.create_index(
+        [("user_id", 1), ("memory_type", 1), ("domain", 1)]
+    )
+    db.user_memory.create_index(
+        [("user_id", 1), ("memory_type", 1), ("source_content_hash", 1)],
+        unique=True,
+    )
+
     logger.info("MongoDB indexes ensured.")
