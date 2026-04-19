@@ -364,14 +364,22 @@ GENERAL CLASSIFICATION (when no critical rule applies)
 • Wants a new plan → "create_{domain}"
 • Wants to modify/change/update plan → "update_{domain}"
 • Wants to delete plan → "delete_{domain}"
-• Wants to see/retrieve plan OR asks about their own plan (e.g. "what should
-  I eat tomorrow", "what's my workout today", "show me Monday's meals",
-  "get my diet", "whats my routine") → "get_{domain}"
+• Wants to see/retrieve plan OR asks about their own plan, INCLUDING
+  archived/old ones — e.g. "what should I eat tomorrow", "what's my
+  workout today", "show me Monday's meals", "get my diet", "whats my
+  routine", "show my old vegan plan", "get my old marathi diet plan",
+  "view my previous workout plan" → "get_{domain}"
+  (The handler will surface the archived plan and prompt the user to
+  reply "restore" if they want to reactivate it.)
 • Sync to Google Calendar / plain "yes" at sync prompt → "sync_{domain}_to_google_calendar"
 • Skip / decline sync ("done", "no", "skip") → "skip_sync_{domain}"
-• Restore an archived/old plan — e.g. "restore vegan", "bring back my
-  old plan", "reactivate my previous {domain} plan", "make my vegan
-  plan active again" → "restore_{domain}_plan"
+• Restore an archived/old plan — ONLY when the user explicitly asks to
+  REACTIVATE / make active again. Examples: "restore", "restore vegan",
+  "reactivate my keto plan", "bring back my old plan AS active",
+  "make my vegan plan active again", "switch back to my marathi plan".
+  Words like "get", "show", "view", "see" with "old"/"previous" are NOT
+  restore — they are "get_{domain}" (view-only). Restore needs a clear
+  reactivation verb.
 • General knowledge question NOT about user's plan, small talk → "general_{domain}_query"
 """
 
