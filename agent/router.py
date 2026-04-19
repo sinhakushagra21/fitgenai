@@ -344,6 +344,22 @@ def _emit_tool_call(
     }
 
 
+_DOMAIN_SCOPE_HINTS = {
+    "diet_tool": (
+        "[Scope: answer ONLY the diet/nutrition/food/meal portion of "
+        "this request. If the user also asks about workout or exercise, "
+        "IGNORE that part — a separate workout specialist is handling it "
+        "in parallel. Do not mention the workout side.]\n\n"
+    ),
+    "workout_tool": (
+        "[Scope: answer ONLY the workout/exercise/training portion of "
+        "this request. If the user also asks about diet or nutrition, "
+        "IGNORE that part — a separate diet specialist is handling it "
+        "in parallel. Do not mention the diet side.]\n\n"
+    ),
+}
+
+
 def _emit_multi_tool_calls(tool_names: list[str], query: str) -> dict:
     """Emit an AIMessage with multiple tool_calls in a single turn.
 
@@ -352,15 +368,20 @@ def _emit_multi_tool_calls(tool_names: list[str], query: str) -> dict:
     dispatch all tool_calls and produce one ToolMessage per call; the
     downstream state_sync node merges state updates from both before
     the router emits the final acknowledgement.
+
+    Each tool receives a domain-scoped version of the query so it only
+    answers its own portion and does not try to cover the sibling
+    domain (which would duplicate content and confuse the UI).
     """
-    calls = [
-        {
+    calls = []
+    for name in tool_names:
+        scope_hint = _DOMAIN_SCOPE_HINTS.get(name, "")
+        scoped_query = f"{scope_hint}{query}" if scope_hint else query
+        calls.append({
             "id": f"call_{name}_{uuid4().hex[:8]}",
             "name": name,
-            "args": {"query": query},
-        }
-        for name in tool_names
-    ]
+            "args": {"query": scoped_query},
+        })
     return {
         "messages": [AIMessage(content="", tool_calls=calls)]
     }
