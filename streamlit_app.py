@@ -2990,20 +2990,35 @@ if prompt:
                             badge_placeholder.markdown(_badge(tool_used), unsafe_allow_html=True)
                             _ui_logger.info("[Turn %s] Routed to tool=%s", turn_id, tool_used)
 
-                    # Parse ToolMessage JSON → user-facing assistant message
+                    # Parse ToolMessage JSON → user-facing assistant message.
+                    # IMPORTANT: with multi-tool dispatch, ToolNode produces
+                    # one ToolMessage per call but they all arrive in the
+                    # same stream event. `last_msg` only holds the latest.
+                    # We must scan ALL trailing ToolMessages so the first
+                    # tool's response is not dropped.
                     from langchain_core.messages import ToolMessage
-                    if isinstance(last_msg, ToolMessage) and last_msg.content:
+                    _trailing_tool_msgs: list = []
+                    for _m in reversed(event["messages"]):
+                        if isinstance(_m, ToolMessage):
+                            _trailing_tool_msgs.append(_m)
+                        else:
+                            break
+                    _trailing_tool_msgs.reverse()
+
+                    if _trailing_tool_msgs:
                         _status_phase = "generating"
                         status.update(label="Crafting…")
+
+                    for _tm in _trailing_tool_msgs:
+                        if not _tm.content:
+                            continue
                         try:
-                            parsed = json.loads(last_msg.content)
-                            # Check if workflow entered profile collection — form will handle display
+                            parsed = json.loads(_tm.content)
                             _tool_state = parsed.get("state_updates", {})
                             _tool_wf = _tool_state.get("workflow", {})
                             _tool_step = _tool_wf.get("step_completed") or _tool_wf.get("stage")
                             if _tool_step in ("prompted_for_user_profile_data", "user_profile_mapped"):
                                 _form_will_render = True
-                            # Capture structured_data for macro chart
                             _sd = _tool_wf.get("structured_data", {})
                             if _sd:
                                 _tool_structured_data = _sd
@@ -3011,26 +3026,9 @@ if prompt:
                             assistant_message = parsed.get("assistant_message")
                             if assistant_message:
                                 if _is_multi_tool:
-                                    _cid = getattr(last_msg, "tool_call_id", "") or ""
+                                    _cid = getattr(_tm, "tool_call_id", "") or ""
                                     if _cid:
                                         _tool_responses[_cid] = assistant_message
-                                    _sections: list[str] = []
-                                    for _cid_k, _tname in _tool_call_map.items():
-                                        _resp = _tool_responses.get(_cid_k)
-                                        if not _resp:
-                                            continue
-                                        _tlabel, _, _ = TOOL_LABELS.get(
-                                            _tname, ("Specialist", "", "#333")
-                                        )
-                                        _sections.append(f"### {_tlabel}\n\n{_resp}")
-                                    if _sections:
-                                        response_content = "\n\n---\n\n".join(_sections)
-                                        tool_direct_reply = True
-                                        _ui_logger.debug(
-                                            "[Turn %s] Multi-tool stitched (tools=%d, chars=%d)",
-                                            turn_id, len(_tool_responses),
-                                            len(response_content),
-                                        )
                                 elif assistant_message != response_content:
                                     response_content = assistant_message
                                     tool_direct_reply = True
@@ -3047,6 +3045,27 @@ if prompt:
                                         _render_technique_tabs(technique_results)
                         except (json.JSONDecodeError, TypeError):
                             _ui_logger.warning("[Turn %s] ToolMessage JSON parse failed", turn_id)
+
+                    # Stitch multi-tool sections AFTER scanning every
+                    # trailing ToolMessage so both responses are present.
+                    if _is_multi_tool and _tool_responses:
+                        _sections: list[str] = []
+                        for _cid_k, _tname in _tool_call_map.items():
+                            _resp = _tool_responses.get(_cid_k)
+                            if not _resp:
+                                continue
+                            _tlabel, _, _ = TOOL_LABELS.get(
+                                _tname, ("Specialist", "", "#333")
+                            )
+                            _sections.append(f"### {_tlabel}\n\n{_resp}")
+                        if _sections:
+                            response_content = "\n\n---\n\n".join(_sections)
+                            tool_direct_reply = True
+                            _ui_logger.debug(
+                                "[Turn %s] Multi-tool stitched (tools=%d/%d, chars=%d)",
+                                turn_id, len(_tool_responses),
+                                len(_tool_call_map), len(response_content),
+                            )
 
                     # Final AIMessage text (not tool-call, not ToolMessage)
                     if (
