@@ -50,8 +50,6 @@ _SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/fitness.nutrition.write",
-    "https://www.googleapis.com/auth/fitness.activity.write",
 ]
 _REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8501")
 
@@ -74,7 +72,7 @@ def save_oauth_context(
 ) -> None:
     """Persist plan data to a temp file before the OAuth redirect.
 
-    sync_target: "calendar", "google_fit", or "both"
+    sync_target: always "calendar" (kept for backward compatibility).
     """
     data = {
         "plan_text": plan_text,

@@ -1,0 +1,14 @@
+{
+  "_comment": "Registry of fine-tuned model IDs, updated by fine_tuning/run_finetune.py. Consumed by agent/shared/llm_helpers.py::resolve_model as a fallback when env vars are unset. Never hand-edit while a training job is running.",
+  "diet": {
+    "plan": null,
+    "intent": null,
+    "qa": null
+  },
+  "workout": {
+    "plan": null,
+    "intent": null,
+    "qa": null
+  },
+  "routing": null
+}

@@ -77,19 +77,16 @@ except Exception as _exc:  # noqa: BLE001
 
 # ── Terminal steps (workflow is "done") ──────────────────────────────
 # NOTE: `diet_confirmed` / `workout_confirmed` are NOT terminal — the user
-# is still being prompted for a sync decision (calendar / fit / both /
-# skip). Keeping the workflow active while `step_completed` is
-# `*_confirmed` lets the router deterministically dispatch the follow-up
-# reply ("yes", "both", "skip", etc.) to the correct domain tool. Once
-# the user actually completes (or declines) sync, the tool transitions
-# to one of the terminal steps below — OR wipes the workflow for a
-# graceful skip — so the next message goes through the fresh-conversation
-# LLM classifier path.
+# is still being prompted for a sync decision (calendar / skip). Keeping
+# the workflow active while `step_completed` is `*_confirmed` lets the
+# router deterministically dispatch the follow-up reply ("yes", "skip",
+# etc.) to the correct domain tool. Once the user actually completes
+# (or declines) sync, the tool transitions to one of the terminal steps
+# below — OR wipes the workflow for a graceful skip — so the next message
+# goes through the fresh-conversation LLM classifier path.
 _TERMINAL_STEPS = frozenset({
     "diet_plan_synced_to_google_calendar",
-    "diet_plan_synced_to_google_fit",
     "workout_plan_synced_to_google_calendar",
-    "workout_plan_synced_to_google_fit",
 })
 
 # ── Valid route targets ──────────────────────────────────────────────
@@ -132,7 +129,7 @@ Choose EXACTLY ONE label for the user turn:
 
 - "stay"         — The turn belongs to the active {domain} workflow. Use for \
 profile answers (name, age, weight, goals…), confirmations ("yes", "confirm", \
-"looks good"), sync replies ("calendar", "fit", "both", "skip", "done"), \
+"looks good"), sync replies ("calendar", "skip", "done"), \
 edits/updates to the {domain} plan, or on-topic {domain} follow-up questions.
 - "side_diet"    — One-off nutrition / food / diet question that is NOT about \
 creating or modifying a plan. Answer out-of-band without disturbing the active \
@@ -148,21 +145,14 @@ diet plan now").
 fully out-of-scope (politics, coding, etc.).
 
 Important rules:
-- Short utterances like "yes", "no", "ok", "both", "skip", numbers, names, \
+- Short utterances like "yes", "no", "ok", "skip", numbers, names, \
 single food words (e.g. "chicken") during profile intake → ALWAYS "stay".
 - Questions about body parts, lifts, reps, sets, form, cardio → "side_workout" \
 (unless the active domain is already workout, in which case "stay").
 - Questions about nutrients, meals, recipes, calories, allergies → "side_diet" \
 (unless the active domain is already diet, in which case "stay").
-- Requests to **retrieve / view / get** the OTHER domain's existing plan \
-(e.g. active domain is workout and user says "get my diet plan", "show my \
-diet for tuesday", "what's my vegan meal plan") → "side_diet". The mirror \
-case (active=diet, user asks for workout plan) → "side_workout". These are \
-NOT "switch" — the user isn't abandoning the current workflow, just peeking \
-at the other domain.
 - Only pick "switch" if the user clearly wants to START A NEW PLAN in the \
-other domain, or explicitly says things like "forget that", "cancel", \
-"instead make me a ...". A side question or retrieval is NOT a switch.
+other domain. A side question is NOT a switch.
 
 Respond with ONE lowercase label and nothing else."""
 

@@ -1001,7 +1001,7 @@ if "code" in _gcal_params:
             st.error(f"Login failed: {_auth_err}")
             st.stop()
 
-    # ── Calendar / Fit OAuth callback ───────────────────────────
+    # ── Calendar OAuth callback ─────────────────────────────────
     else:
         # Clear query params immediately to prevent re-processing on rerun.
         st.query_params.clear()
@@ -1054,80 +1054,6 @@ if "code" in _gcal_params:
                         st.session_state["calendar_events_pushed"] = True
                     else:
                         st.warning("⚠️ Connected to Google Calendar, but couldn't extract events from your plan.")
-
-                # ── Google Fit sync ──
-                if _sync_target in ("google_fit", "both"):
-                    from agent.tools.google_fit_integration import (
-                        extract_nutrition_data,
-                        extract_activity_sessions,
-                        push_nutrition_to_google_fit,
-                        push_activities_to_google_fit,
-                    )
-                    if _domain == "diet":
-                        _gcal_logger.info("[GoogleFit] About to extract nutrition: plan_len=%d, profile_keys=%s",
-                                          len(_plan_text), sorted(_profile.keys()) if _profile else "empty")
-                        nutrition = None
-                        for _attempt in range(1, 3):  # 2 attempts
-                            with st.spinner(f"💪 Extracting nutrition data (attempt {_attempt}/2)..."):
-                                try:
-                                    nutrition = extract_nutrition_data(_plan_text, _domain, _profile)
-                                except Exception as _ext_err:
-                                    _gcal_logger.error("[GoogleFit] Extraction attempt %d failed: %s",
-                                                        _attempt, _ext_err, exc_info=True)
-                                    nutrition = []
-                            if nutrition:
-                                break
-                            _gcal_logger.warning("[GoogleFit] Extraction attempt %d returned 0 entries", _attempt)
-
-                        _gcal_logger.info("[GoogleFit] Final extraction: %d entries", len(nutrition) if nutrition else 0)
-                        if nutrition:
-                            st.info(f"Found {len(nutrition)} meals. Pushing to Google Fit...")
-                            with st.spinner(f"💪 Pushing {len(nutrition)} meals to Google Fit..."):
-                                fit_count, fit_errors = push_nutrition_to_google_fit(nutrition, tokens)
-                            st.session_state["_gfit_push_count"] = fit_count
-                            if fit_count > 0:
-                                st.success(
-                                    f"💪 **{fit_count} nutrition entries** synced to Google Fit! "
-                                    f"Check the Google Fit app for your meal data."
-                                )
-                            if fit_errors:
-                                st.warning(
-                                    f"⚠️ {len(fit_errors)} entries failed:\n"
-                                    + "\n".join(f"- {e}" for e in fit_errors[:5])
-                                )
-                            if fit_count == 0 and not fit_errors:
-                                st.warning("⚠️ No entries were pushed. Check the logs for details.")
-                            _gcal_logger.info("[GoogleFit] Pushed %d nutrition entries, %d errors", fit_count, len(fit_errors))
-                        else:
-                            st.warning(
-                                f"⚠️ Connected to Google Fit, but couldn't extract nutrition data.\n\n"
-                                f"**Debug**: plan_text length = {len(_plan_text)}, domain = {_domain}, "
-                                f"profile fields = {len(_profile)} — check Logs panel for details."
-                            )
-                    elif _domain == "workout":
-                        with st.spinner("💪 Extracting workout sessions from your plan..."):
-                            sessions = extract_activity_sessions(_plan_text, _domain, _profile)
-                        _gcal_logger.info("[GoogleFit] Extracted %d activity sessions", len(sessions) if sessions else 0)
-                        if sessions:
-                            st.info(f"Found {len(sessions)} workout sessions. Pushing to Google Fit...")
-                            with st.spinner(f"💪 Pushing {len(sessions)} sessions to Google Fit..."):
-                                fit_count, fit_errors = push_activities_to_google_fit(sessions, tokens)
-                            st.session_state["_gfit_push_count"] = fit_count
-                            if fit_count > 0:
-                                st.success(
-                                    f"💪 **{fit_count} workout sessions** synced to Google Fit! "
-                                    f"Check the Google Fit app for your activity data."
-                                )
-                            if fit_errors:
-                                st.warning(
-                                    f"⚠️ {len(fit_errors)} sessions failed:\n"
-                                    + "\n".join(f"- {e}" for e in fit_errors[:5])
-                                )
-                            _gcal_logger.info("[GoogleFit] Pushed %d sessions, %d errors", fit_count, len(fit_errors))
-                        else:
-                            st.warning("⚠️ Connected to Google Fit, but couldn't extract activity sessions from your plan.")
-                    _gfit_actually_pushed = st.session_state.get("_gfit_push_count", 0) > 0
-                    st.session_state["google_fit_data_pushed"] = _gfit_actually_pushed
 
                 # Store tokens and clean up.
                 st.session_state["google_calendar_tokens"] = tokens
@@ -1490,7 +1416,7 @@ if not _is_authenticated:
         '  <div class="feature-card">'
         '    <div class="feature-icon">&#x1F4C5;</div>'
         '    <div class="feature-name">Google Sync</div>'
-        '    <div class="feature-desc">Push meals to Calendar &amp; nutrition data to Google Fit automatically</div>'
+        '    <div class="feature-desc">Push meals and workouts to Google Calendar automatically</div>'
         '  </div>'
         '</div>',
         unsafe_allow_html=True,
@@ -1516,7 +1442,7 @@ if not _is_authenticated:
         '    <div class="how-step">'
         '      <div class="how-num">3</div>'
         '      <div class="how-step-title">Sync &amp; Crush It</div>'
-        '      <div class="how-step-desc">Calendar + Google Fit</div>'
+        '      <div class="how-step-desc">Google Calendar sync</div>'
         '    </div>'
         '  </div>'
         '</div>',
@@ -2393,7 +2319,7 @@ with st.sidebar:
         s in _completed
         for s in (
             "diet_confirmed", "workout_confirmed",
-            "calendar_sync_started", "google_fit_sync_started",
+            "calendar_sync_started",
         )
     )
 
@@ -2698,55 +2624,6 @@ with st.sidebar:
         st.caption("Add Google credentials to `.env` to enable calendar sync.")
     else:
         st.caption("Generate a plan to enable calendar sync.")
-
-    # ── Google Fit ──────────────────────────────────────────────
-    st.markdown("## 💪 Google Fit")
-
-    _gfit_already_pushed = st.session_state.get("google_fit_data_pushed", False)
-
-    _gfit_sync_active = _calendar_step in (
-        "diet_plan_synced_to_google_fit",
-        "workout_plan_synced_to_google_fit",
-        "google_fit_oauth_pending",  # legacy
-    )
-
-    if _gfit_already_pushed:
-        st.success("✅ Google Fit synced!")
-    elif _has_google_creds and _gfit_sync_active:
-        try:
-            from agent.tools.calendar_integration import (
-                get_authorization_url as _gfit_get_auth_url,
-                save_oauth_context as _gfit_save_ctx,
-                load_oauth_context as _gfit_load_ctx,
-            )
-            _gfit_auth_url, _ = _gfit_get_auth_url()
-
-            # Only save context if we have plan text — don't overwrite
-            # a good context file with empty data on Streamlit reruns.
-            _gfit_plan_text = _wf_state.get("plan_text", "")
-            if not _gfit_plan_text:
-                # Try loading from existing context file
-                _existing_ctx = _gfit_load_ctx()
-                _gfit_plan_text = _existing_ctx.get("plan_text", "")
-
-            if _gfit_plan_text:
-                _gfit_domain = _wf_state.get("domain", "diet")
-                _gfit_profile = st.session_state.get("agent_state", {}).get("user_profile", {})
-                _gfit_save_ctx(
-                    plan_text=_gfit_plan_text,
-                    domain=_gfit_domain,
-                    profile=_gfit_profile,
-                    sync_target="google_fit",
-                )
-
-            st.link_button("💪 Sync to Google Fit", _gfit_auth_url, use_container_width=True)
-            st.caption("Sign in with Google to sync nutrition/activity data.")
-        except Exception as _e:
-            st.caption(f"⚠️ Google Fit error: {_e}")
-    elif not _has_google_creds:
-        st.caption("Add Google credentials to `.env` to enable Google Fit.")
-    else:
-        st.caption("Generate a plan to enable Google Fit sync.")
 
     st.divider()
 

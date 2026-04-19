@@ -4,7 +4,7 @@ agent/tools/workout_tool.py
 FITGEN.AI Workout Specialist Tool.
 
 Self-contained multi-turn workflow for workout plan creation, modification,
-retrieval, deletion, calendar/fit sync, and general fitness queries.
+retrieval, deletion, calendar sync, and general fitness queries.
 
 Flow: workout_tool() → execute() → handle_multi_turn()
 
@@ -69,13 +69,11 @@ _DRAFT_PLAN_STEPS = frozenset({
 # Steps that indicate the workflow is fully complete.
 _TERMINAL_STEPS = frozenset({
     "workout_plan_synced_to_google_calendar",
-    "workout_plan_synced_to_google_fit",
 })
 
 # Intents that belong to the post-confirm sync flow.
 _SYNC_INTENTS = frozenset({
     "sync_workout_to_google_calendar",
-    "sync_workout_to_google_fit",
 })
 
 
@@ -298,8 +296,8 @@ def workout_tool(
 ) -> str:
     """Exercise & training specialist. Handles workout plans, training \
 splits, reps/sets, body-part and lift guidance (chest, back, traps, legs, \
-biceps, deadlift, squat, etc.), cardio, mobility, sync to Google Calendar \
-/ Google Fit, and general exercise Q&A.
+biceps, deadlift, squat, etc.), cardio, mobility, sync to Google Calendar, \
+and general exercise Q&A.
 
     Use this tool for anything workout-, exercise-, lift-, or body-part-
     related, including creating, updating, retrieving, confirming, or
@@ -481,8 +479,7 @@ def _handle_create_workout(query: str, ctx: WorkoutSessionContext) -> str:
     # ── Step A: Fresh create or re-entering ──
     if step is None or step in ("workout_confirmed", "workout_plan_generated",
                                  "updated_workout_plan",
-                                 "workout_plan_synced_to_google_calendar",
-                                 "workout_plan_synced_to_google_fit"):
+                                 "workout_plan_synced_to_google_calendar"):
         updates = extract_profile_updates_with_fallback(
             query, WORKOUT_REQUIRED_FIELDS, WORKOUT_ALL_FIELDS
         )
@@ -699,16 +696,14 @@ def _handle_confirm_workout(query: str, ctx: WorkoutSessionContext) -> str:
         plan_text="",
         structured_data={},
         pending_question=(
-            "Would you like to sync to Google Calendar, Google Fit, or both?"
+            "Would you like to sync to Google Calendar?"
         ),
     )
 
     return _build(
         "Your workout plan is confirmed! 💪\n\n"
-        "Would you like to sync it to:\n"
-        "- **Google Calendar** (schedule workouts as events)\n"
-        "- **Google Fit** (log activity data)\n"
-        "- **Both**\n\n"
+        "Would you like to sync it to **Google Calendar** "
+        "(schedule workouts as events)?\n\n"
         "Or just say **done** if you're all set!",
         ctx,
     )
@@ -733,73 +728,16 @@ def _handle_skip_sync_workout(query: str, ctx: WorkoutSessionContext) -> str:
     )
 
 
-def _handle_sync_to_both(query: str, ctx: WorkoutSessionContext) -> str:
-    """Sync the plan to BOTH Google Calendar and Google Fit."""
-    _plan = _resolve_plan_text(ctx)
-    if not _plan:
-        return _build(
-            "You don't have a workout plan to sync yet. Create one first!",
-            ctx,
-        )
-
-    try:
-        from agent.tools.calendar_integration import (
-            get_authorization_url, save_oauth_context,
-        )
-
-        auth_url, oauth_state = get_authorization_url()
-        save_oauth_context(
-            plan_text=_plan, domain=_DOMAIN,
-            profile=ctx.profile, sync_target="both",
-        )
-
-        _plan_id = ctx.workflow.get("plan_id")
-        if _plan_id:
-            WorkoutPlanRepository.update_plan(
-                _plan_id, calendar_synced=True, fit_synced=True,
-            )
-
-        _update_workflow(
-            ctx,
-            step_completed="workout_plan_synced_to_google_calendar",
-            step_name="sync_both_started",
-            intent="sync_workout_to_both",
-            oauth_state=oauth_state,
-            pending_question="Click the button in the sidebar to complete the sync.",
-        )
-
-        _wipe_sync_workflow(ctx)
-
-        return _build(
-            "🔗 **Ready to connect Google — syncing to both Calendar & Fit!**\n\n"
-            "Click the **\"📅 Connect Google Calendar\"** button in the sidebar "
-            "to authorise. One sign-in covers both Google Calendar and Google "
-            "Fit.\n\n"
-            f"Or open this link directly: [Authorize FITGEN.AI]({auth_url})",
-            ctx,
-            extra={
-                "calendar_sync_requested": True,
-                "google_fit_sync_requested": True,
-                "calendar_auth_url": auth_url,
-            },
-        )
-
-    except Exception as exc:  # noqa: BLE001
-        handle_exception(
-            exc,
-            module="workout_tool",
-            context="sync to both (calendar + fit)",
-            extra={"session_id": ctx.session_id},
-        )
-        return _build(
-            "Google integration is not configured. Please check "
-            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your .env file.",
-            ctx,
-        )
-
-
 def _handle_update_workout(query: str, ctx: WorkoutSessionContext) -> str:
     """Handle update_workout intent — map changes, regenerate plan."""
+    # Load latest confirmed plan from MongoDB if session draft is empty, so
+    # incremental edits patch the existing plan instead of regenerating it.
+    if not ctx.plan_text and ctx.user_id:
+        latest = WorkoutPlanRepository.find_latest_by_user(ctx.user_id, status="confirmed")
+        if latest:
+            ctx.plan_text = latest.get("plan_markdown", "") or ""
+            logger.info("[WorkoutFlow] update_workout: loaded confirmed plan from MongoDB")
+
     if not ctx.plan_text:
         logger.info("[WorkoutFlow] update_workout: no existing plan")
         _update_workflow(
@@ -908,8 +846,6 @@ def _handle_get_workout(query: str, ctx: WorkoutSessionContext) -> str:
     ctx.completed_steps = []
     ctx.pending_question = None
 
-    # RAG with graceful fallback: on empty/failure we still have _plan
-    # loaded from MongoDB so answer_plan_question always has something.
     retrieved_context = ""
     if ctx.user_id and not _is_archived:
         try:
@@ -920,20 +856,8 @@ def _handle_get_workout(query: str, ctx: WorkoutSessionContext) -> str:
             )
             if chunks:
                 retrieved_context = "\n\n".join(c.render() for c in chunks)
-                logger.info(
-                    "[workout_tool] RAG hit: %d chunks for query=%r",
-                    len(chunks), query[:80],
-                )
-            else:
-                logger.info(
-                    "[workout_tool] RAG empty — falling back to MongoDB "
-                    "plan_markdown (%d chars)", len(_plan),
-                )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[workout_tool] RAG retrieve failed (%s) — falling back "
-                "to MongoDB plan_markdown", exc,
-            )
+            logger.warning("[workout_tool] RAG retrieve failed: %s", exc)
 
     answer = answer_plan_question(
         _DOMAIN, _plan, query, context=retrieved_context,
@@ -1085,63 +1009,6 @@ def _handle_sync_to_google_calendar(
         )
 
 
-def _handle_sync_to_google_fit(
-    query: str, ctx: WorkoutSessionContext,
-) -> str:
-    """Handle sync_workout_to_google_fit intent."""
-    _plan = _resolve_plan_text(ctx)
-    if not _plan:
-        return _build("You don't have a workout plan to sync yet. Create one first!", ctx)
-
-    try:
-        from agent.tools.calendar_integration import (
-            get_authorization_url, save_oauth_context,
-        )
-
-        auth_url, _ = get_authorization_url()
-        save_oauth_context(
-            plan_text=_plan, domain=_DOMAIN,
-            profile=ctx.profile, sync_target="google_fit",
-        )
-
-        # Mark plan as fit-synced in MongoDB
-        _plan_id = ctx.workflow.get("plan_id")
-        if _plan_id:
-            WorkoutPlanRepository.update_plan(_plan_id, fit_synced=True)
-
-        _update_workflow(
-            ctx,
-            step_completed="workout_plan_synced_to_google_fit",
-            step_name="google_fit_sync_started",
-            intent="sync_workout_to_google_fit",
-        )
-
-        # Terminal branch — wipe residual workflow.
-        _wipe_sync_workflow(ctx)
-
-        return _build(
-            "💪 **Ready to connect Google Fit!**\n\n"
-            "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
-            "to sign in with Google and sync your plan data.\n\n"
-            f"Or open this link directly: [Authorize Google Fit]({auth_url})",
-            ctx,
-            extra={"google_fit_sync_requested": True},
-        )
-
-    except Exception as exc:  # noqa: BLE001
-        handle_exception(
-            exc,
-            module="workout_tool",
-            context="google fit sync",
-            extra={"session_id": ctx.session_id},
-        )
-        return _build(
-            "Google Fit integration is not configured. "
-            "Please check your .env file.",
-            ctx,
-        )
-
-
 def _handle_general_workout_query(
     query: str, ctx: WorkoutSessionContext,
 ) -> str:
@@ -1156,8 +1023,6 @@ def _handle_general_workout_query(
         _plan = ctx.plan_text  # fallback to session only if same domain
 
     # Personal RAG — fetch top-k chunks from the user's own plan + memory.
-    # Falls back gracefully: if retrieval errors or returns 0 chunks, we
-    # still answer from ``_plan`` (loaded from MongoDB above).
     retrieved_context = ""
     if ctx.user_id:
         try:
@@ -1168,20 +1033,8 @@ def _handle_general_workout_query(
             )
             if chunks:
                 retrieved_context = "\n\n".join(c.render() for c in chunks)
-                logger.info(
-                    "[workout_tool] RAG hit: %d chunks for query=%r",
-                    len(chunks), query[:80],
-                )
-            else:
-                logger.info(
-                    "[workout_tool] RAG empty — falling back to "
-                    "MongoDB plan_markdown (%d chars)", len(_plan),
-                )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[workout_tool] RAG retrieve failed (%s) — falling back "
-                "to MongoDB plan_markdown", exc,
-            )
+            logger.warning("[workout_tool] RAG retrieve failed: %s", exc)
 
     answer = answer_followup_question(
         _DOMAIN, query, ctx.profile, _plan, ctx.system_prompt,
@@ -1267,8 +1120,7 @@ def _handle_restore_workout_plan(
 
     return _build(
         f"✅ Restored **{plan_name}** as your active workout plan. "
-        "Ask me anything about it, or say **sync to calendar** / "
-        "**sync to fit** to push it out.",
+        "Ask me anything about it, or say **sync to calendar** to push it out.",
         ctx,
     )
 
@@ -1280,8 +1132,6 @@ _INTENT_HANDLERS.update({
     "delete_workout": _handle_delete_workout,
     "confirm_workout": _handle_confirm_workout,
     "sync_workout_to_google_calendar": _handle_sync_to_google_calendar,
-    "sync_workout_to_google_fit": _handle_sync_to_google_fit,
-    "sync_workout_to_both": _handle_sync_to_both,
     "skip_sync_workout": _handle_skip_sync_workout,
     "general_workout_query": _handle_general_workout_query,
     "restore_workout_plan": _handle_restore_workout_plan,

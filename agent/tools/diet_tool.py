@@ -4,7 +4,7 @@ agent/tools/diet_tool.py
 FITGEN.AI Diet & Nutrition Specialist Tool.
 
 Self-contained multi-turn workflow for diet plan creation, modification,
-retrieval, deletion, calendar/fit sync, and general nutrition queries.
+retrieval, deletion, calendar sync, and general nutrition queries.
 
 Flow: diet_tool() → execute() → handle_multi_turn()
 
@@ -70,13 +70,11 @@ _DRAFT_PLAN_STEPS = frozenset({
 # Steps that indicate the workflow is fully complete.
 _TERMINAL_STEPS = frozenset({
     "diet_plan_synced_to_google_calendar",
-    "diet_plan_synced_to_google_fit",
 })
 
 # Intents that belong to the post-confirm sync flow.
 _SYNC_INTENTS = frozenset({
     "sync_diet_to_google_calendar",
-    "sync_diet_to_google_fit",
 })
 
 
@@ -319,7 +317,7 @@ def diet_tool(
 ) -> str:
     """Diet & nutrition specialist. Handles meal plans, macros, calorie \
 targets, food recommendations, allergies/preferences, snacking habits, \
-sync to Google Calendar / Google Fit, and general nutrition Q&A.
+sync to Google Calendar, and general nutrition Q&A.
 
     Use this tool for anything food-, meal-, nutrition-, or calorie-related,
     including creating, updating, retrieving, confirming, or deleting a
@@ -523,8 +521,7 @@ def _handle_create_diet(query: str, ctx: DietSessionContext) -> str:
     # ── Step A: Fresh create or re-entering create flow ──
     if step is None or step in ("diet_confirmed", "diet_plan_generated",
                                  "updated_diet_plan",
-                                 "diet_plan_synced_to_google_calendar",
-                                 "diet_plan_synced_to_google_fit"):
+                                 "diet_plan_synced_to_google_calendar"):
         # Extract any profile data from the initial query
         updates = extract_profile_updates_with_fallback(
             query, DIET_REQUIRED_FIELDS, DIET_ALL_FIELDS
@@ -745,16 +742,14 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
         plan_text="",
         structured_data={},
         pending_question=(
-            "Would you like to sync to Google Calendar, Google Fit, or both?"
+            "Would you like to sync to Google Calendar?"
         ),
     )
 
     return _build(
         "Your diet plan is confirmed! 🎉\n\n"
-        "Would you like to sync it to:\n"
-        "- **Google Calendar** (schedule meals as events)\n"
-        "- **Google Fit** (log nutrition data)\n"
-        "- **Both**\n\n"
+        "Would you like to sync it to **Google Calendar** "
+        "(schedule meals as events)?\n\n"
         "Or just say **done** if you're all set!",
         ctx,
     )
@@ -763,9 +758,8 @@ def _handle_confirm_diet(query: str, ctx: DietSessionContext) -> str:
 def _wipe_sync_workflow(ctx: DietSessionContext) -> None:
     """Clear all workflow state after sync decision is terminal.
 
-    Called from the three terminal branches:
+    Called from the terminal branches:
       • sync_diet_to_google_calendar  (OAuth hand-off started)
-      • sync_diet_to_google_fit       (OAuth hand-off started)
       • skip_sync_diet                (user declined sync)
 
     After this runs the next user message will go through the router's
@@ -789,87 +783,17 @@ def _handle_skip_sync_diet(query: str, ctx: DietSessionContext) -> str:
     )
 
 
-def _handle_sync_to_both(query: str, ctx: DietSessionContext) -> str:
-    """Sync the plan to BOTH Google Calendar and Google Fit.
-
-    We chain the two existing handlers. Each handler kicks off its own
-    OAuth hand-off and marks the plan in MongoDB. The final response
-    combines both CTAs for the sidebar.
-    """
-    _plan = _resolve_plan_text(ctx)
-    if not _plan:
-        return _build(
-            "You don't have a diet plan to sync yet. Create one first!",
-            ctx,
-        )
-
-    try:
-        from agent.tools.calendar_integration import (
-            get_authorization_url,
-            save_oauth_context,
-        )
-
-        auth_url, oauth_state = get_authorization_url()
-
-        # One OAuth session authorises both scopes — save context with
-        # sync_target="both" so the post-OAuth handler performs both syncs.
-        save_oauth_context(
-            plan_text=_plan,
-            domain=_DOMAIN,
-            profile=ctx.profile,
-            sync_target="both",
-        )
-
-        _plan_id = ctx.workflow.get("plan_id")
-        if _plan_id:
-            DietPlanRepository.update_plan(
-                _plan_id, calendar_synced=True, fit_synced=True,
-            )
-
-        _update_workflow(
-            ctx,
-            step_completed="diet_plan_synced_to_google_calendar",
-            step_name="sync_both_started",
-            intent="sync_diet_to_both",
-            oauth_state=oauth_state,
-            pending_question="Click the button in the sidebar to complete the sync.",
-        )
-
-        # Wipe AFTER _update_workflow has captured the terminal step —
-        # the state_sync layer reads from ctx.workflow on this turn.
-        _wipe_sync_workflow(ctx)
-
-        return _build(
-            "🔗 **Ready to connect Google — syncing to both Calendar & Fit!**\n\n"
-            "Click the **\"📅 Connect Google Calendar\"** button in the sidebar "
-            "to authorise. One sign-in covers both Google Calendar and Google "
-            "Fit.\n\n"
-            f"Or open this link directly: [Authorize FITGEN.AI]({auth_url})",
-            ctx,
-            extra={
-                "calendar_sync_requested": True,
-                "google_fit_sync_requested": True,
-                "calendar_auth_url": auth_url,
-            },
-        )
-
-    except Exception as exc:  # noqa: BLE001
-        handle_exception(
-            exc,
-            module="diet_tool",
-            context="sync to both (calendar + fit)",
-            extra={"session_id": ctx.session_id},
-        )
-        return _build(
-            "I'd love to sync to Google Calendar and Google Fit, but the "
-            "integration is not configured. Please check GOOGLE_CLIENT_ID "
-            "and GOOGLE_CLIENT_SECRET in your .env file.",
-            ctx,
-        )
-
-
 def _handle_update_diet(query: str, ctx: DietSessionContext) -> str:
     """Handle update_diet intent — map changes, regenerate plan incrementally."""
+    # Load latest confirmed plan from MongoDB if session draft is empty.
+    # Without this, a user who confirmed a plan then came back later would
+    # regenerate the whole plan instead of patching only the requested portion.
+    if not ctx.plan_text and ctx.user_id:
+        latest = DietPlanRepository.find_latest_by_user(ctx.user_id, status="confirmed")
+        if latest:
+            ctx.plan_text = latest.get("plan_markdown", "") or ""
+            logger.info("[DietFlow] update_diet: loaded confirmed plan from MongoDB")
+
     # If no existing plan → redirect to create
     if not ctx.plan_text:
         logger.info("[DietFlow] update_diet: no existing plan, redirecting to create")
@@ -995,20 +919,8 @@ def _handle_get_diet(query: str, ctx: DietSessionContext) -> str:
             )
             if chunks:
                 retrieved_context = "\n\n".join(c.render() for c in chunks)
-                logger.info(
-                    "[diet_tool] RAG hit: %d chunks for query=%r",
-                    len(chunks), query[:80],
-                )
-            else:
-                logger.info(
-                    "[diet_tool] RAG empty — falling back to MongoDB "
-                    "plan_markdown (%d chars)", len(_plan),
-                )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[diet_tool] RAG retrieve failed (%s) — falling back to "
-                "MongoDB plan_markdown", exc,
-            )
+            logger.warning("[diet_tool] RAG retrieve failed: %s", exc)
 
     answer = answer_plan_question(
         _DOMAIN, _plan, query, context=retrieved_context,
@@ -1189,73 +1101,6 @@ def _handle_sync_to_google_calendar(
         )
 
 
-def _handle_sync_to_google_fit(
-    query: str,
-    ctx: DietSessionContext,
-) -> str:
-    """Handle sync_diet_to_google_fit intent."""
-    _plan = _resolve_plan_text(ctx)
-    if not _plan:
-        return _build(
-            "You don't have a diet plan to sync yet. Create one first!",
-            ctx,
-        )
-
-    try:
-        from agent.tools.calendar_integration import (
-            get_authorization_url,
-            save_oauth_context,
-        )
-
-        auth_url, _oauth_state = get_authorization_url()
-
-        save_oauth_context(
-            plan_text=_plan,
-            domain=_DOMAIN,
-            profile=ctx.profile,
-            sync_target="google_fit",
-        )
-
-        # Mark plan as fit-synced in MongoDB
-        _plan_id = ctx.workflow.get("plan_id")
-        if _plan_id:
-            DietPlanRepository.update_plan(_plan_id, fit_synced=True)
-
-        _update_workflow(
-            ctx,
-            step_completed="diet_plan_synced_to_google_fit",
-            step_name="google_fit_sync_started",
-            intent="sync_diet_to_google_fit",
-            pending_question="Click the button in the sidebar to complete the sync.",
-        )
-
-        # Terminal branch — wipe residual workflow.
-        _wipe_sync_workflow(ctx)
-
-        return _build(
-            "💪 **Ready to connect Google Fit!**\n\n"
-            "Click the **\"💪 Sync to Google Fit\"** button in the sidebar "
-            "to sign in with Google and sync your plan data.\n\n"
-            f"Or open this link directly: [Authorize Google Fit]({auth_url})",
-            ctx,
-            extra={"google_fit_sync_requested": True},
-        )
-
-    except Exception as exc:  # noqa: BLE001
-        handle_exception(
-            exc,
-            module="diet_tool",
-            context="google fit sync",
-            extra={"session_id": ctx.session_id},
-        )
-        return _build(
-            "I'd love to sync to Google Fit, but the integration "
-            "is not configured yet. Please check that GOOGLE_CLIENT_ID "
-            "and GOOGLE_CLIENT_SECRET are set in your .env file.",
-            ctx,
-        )
-
-
 def _handle_general_diet_query(
     query: str,
     ctx: DietSessionContext,
@@ -1275,8 +1120,6 @@ def _handle_general_diet_query(
         _plan = ctx.plan_text  # fallback to session only if same domain
 
     # Personal RAG — fetch top-k chunks from the user's own plan + memory.
-    # Falls back gracefully: if retrieval errors or returns 0 chunks, we
-    # still answer from ``_plan`` (loaded from MongoDB above).
     retrieved_context = ""
     if ctx.user_id:
         try:
@@ -1287,20 +1130,8 @@ def _handle_general_diet_query(
             )
             if chunks:
                 retrieved_context = "\n\n".join(c.render() for c in chunks)
-                logger.info(
-                    "[diet_tool] RAG hit: %d chunks for query=%r",
-                    len(chunks), query[:80],
-                )
-            else:
-                logger.info(
-                    "[diet_tool] RAG empty — falling back to MongoDB "
-                    "plan_markdown (%d chars)", len(_plan),
-                )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[diet_tool] RAG retrieve failed (%s) — falling back to "
-                "MongoDB plan_markdown", exc,
-            )
+            logger.warning("[diet_tool] RAG retrieve failed: %s", exc)
 
     answer = answer_followup_question(
         _DOMAIN, query, ctx.profile, _plan, ctx.system_prompt,
@@ -1393,8 +1224,7 @@ def _handle_restore_diet_plan(query: str, ctx: DietSessionContext) -> str:
 
     return _build(
         f"✅ Restored **{plan_name}** as your active diet plan. "
-        "Ask me anything about it, or say **sync to calendar** / "
-        "**sync to fit** to push it out.",
+        "Ask me anything about it, or say **sync to calendar** to push it out.",
         ctx,
     )
 
@@ -1408,8 +1238,6 @@ _INTENT_HANDLERS.update({
     "delete_diet": _handle_delete_diet,
     "confirm_diet": _handle_confirm_diet,
     "sync_diet_to_google_calendar": _handle_sync_to_google_calendar,
-    "sync_diet_to_google_fit": _handle_sync_to_google_fit,
-    "sync_diet_to_both": _handle_sync_to_both,
     "skip_sync_diet": _handle_skip_sync_diet,
     "general_diet_query": _handle_general_diet_query,
     "restore_diet_plan": _handle_restore_diet_plan,

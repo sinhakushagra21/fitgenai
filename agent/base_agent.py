@@ -101,13 +101,11 @@ diet_tool), you MUST follow these rules with ZERO exceptions:
 
 # Steps that indicate a workflow has reached its final state.
 # NOTE: "diet_confirmed" and "workout_confirmed" are NOT terminal —
-# after confirm the tool offers Google Calendar/Fit sync, so the next
+# after confirm the tool offers Google Calendar sync, so the next
 # user message (e.g. "sync to calendar") must still route to the tool.
 _TERMINAL_STEPS = frozenset({
     "diet_plan_synced_to_google_calendar",
-    "diet_plan_synced_to_google_fit",
     "workout_plan_synced_to_google_calendar",
-    "workout_plan_synced_to_google_fit",
 })
 
 

@@ -34,8 +34,8 @@ _SESSION_TTL_HOURS = float(os.getenv("FITGEN_SESSION_TTL_HOURS", "1"))
 # Sessions in these states can be cleaned up aggressively.
 _COMPLETED_WORKFLOW_STEPS = frozenset({
     "diet_confirmed", "workout_confirmed",
-    "diet_plan_synced_to_google_calendar", "diet_plan_synced_to_google_fit",
-    "workout_plan_synced_to_google_calendar", "workout_plan_synced_to_google_fit",
+    "diet_plan_synced_to_google_calendar",
+    "workout_plan_synced_to_google_calendar",
 })
 
 

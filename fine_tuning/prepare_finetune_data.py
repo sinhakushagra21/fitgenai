@@ -21,12 +21,16 @@ Outputs:
   fine_tuning/data/finetune_val.jsonl
 
 Run:
-    python -m fine_tuning.prepare_finetune_data
+    python -m fine_tuning.prepare_finetune_data                # routing (default)
+    python -m fine_tuning.prepare_finetune_data --source mongo \
+        --domain diet --task plan                              # defers to miner
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -153,6 +157,29 @@ def _write_jsonl(path: Path, data: list[dict]) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Prepare FITGEN.AI fine-tuning data")
+    parser.add_argument(
+        "--source",
+        choices=["static", "mongo"],
+        default="static",
+        help="'static' uses data/train.jsonl (routing). 'mongo' defers to "
+             "mine_plan_training_data.py for plan/intent/qa.",
+    )
+    parser.add_argument("--domain", choices=["diet", "workout"], default=None)
+    parser.add_argument("--task", choices=["plan", "intent", "qa"], default=None)
+    args = parser.parse_args()
+
+    if args.source == "mongo":
+        if not args.domain or not args.task:
+            raise SystemExit("--domain and --task are required when --source=mongo")
+        print(f"Delegating to mine_plan_training_data.py (domain={args.domain}, task={args.task})")
+        subprocess.run(
+            [sys.executable, "-m", "fine_tuning.mine_plan_training_data",
+             "--domain", args.domain, "--task", args.task],
+            check=True,
+        )
+        return
+
     print("Loading source data...")
     train_raw = _load_jsonl(TRAIN_SRC)
     dev_raw = _load_jsonl(DEV_SRC)

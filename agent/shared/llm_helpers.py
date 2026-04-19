@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -35,6 +37,75 @@ logger = logging.getLogger("fitgen.llm_helpers")
 _PLAN_MODEL = DEFAULT_MODEL   # gpt-5.1 — expensive, high quality
 _FAST_MODEL = FAST_MODEL      # gpt-4.1-mini — fast, cheap
 
+# ── Fine-tuned model registry ────────────────────────────────────────
+# File written by fine_tuning/run_finetune.py. Loaded lazily.
+_REGISTRY_PATH = Path(__file__).resolve().parents[2] / "fine_tuning" / "data" / "finetuned_model_ids.json"
+_registry_cache: dict[str, Any] | None = None
+
+
+def _load_registry() -> dict[str, Any]:
+    global _registry_cache
+    if _registry_cache is not None:
+        return _registry_cache
+    if _REGISTRY_PATH.exists():
+        try:
+            _registry_cache = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            _registry_cache = {}
+    else:
+        _registry_cache = {}
+    return _registry_cache
+
+
+def resolve_model(purpose: str, domain: str | None = None) -> str:
+    """Resolve which OpenAI model to call for a given (purpose, domain).
+
+    Resolution priority, highest first:
+      1. FITGEN_{DOMAIN}_{PURPOSE}_MODEL env var   (most specific)
+      2. FITGEN_{PURPOSE}_MODEL env var            (global override)
+      3. finetuned_model_ids.json registry entry   (if populated)
+      4. Hardcoded fallback in agent/config.py     (DEFAULT_MODEL / FAST_MODEL)
+
+    Args:
+        purpose: "plan" (heavy generation), "fast" (routing/classification),
+                 or "qa" (follow-up questions).
+        domain:  "diet", "workout", or None for domain-agnostic calls.
+
+    Returns:
+        Model ID string suitable for passing to ``ChatOpenAI(model=...)``.
+    """
+    purpose = purpose.lower()
+    dom = (domain or "").lower() or None
+
+    # 1. Per-domain env var
+    if dom:
+        env_val = os.getenv(f"FITGEN_{dom.upper()}_{purpose.upper()}_MODEL")
+        if env_val:
+            return env_val
+
+    # 2. Global env var
+    env_val = os.getenv(f"FITGEN_{purpose.upper()}_MODEL")
+    if env_val:
+        return env_val
+
+    # 3. Registry (fine-tune output)
+    reg = _load_registry()
+    if dom:
+        reg_domain = reg.get(dom) or {}
+        reg_key = "fast" if purpose == "fast" else purpose
+        # registry uses "intent" for the fast/classifier slot
+        candidate = reg_domain.get("intent" if purpose == "fast" else reg_key)
+        if candidate:
+            return candidate
+
+    # 4. Hardcoded defaults
+    if purpose == "plan":
+        return _PLAN_MODEL
+    if purpose == "qa":
+        return _FAST_MODEL  # Q&A uses the fast model today
+    return _FAST_MODEL
+
+
 __all__ = [
     "classify_intent",
     "extract_profile_updates",
@@ -44,6 +115,7 @@ __all__ = [
     "generate_plan",
     "generate_plan_as_json",
     "generate_plan_name",
+    "resolve_model",
     "validate_plan_json",
     "plan_json_to_markdown",
 ]
@@ -53,18 +125,28 @@ __all__ = [
 # Core LLM call
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _llm_json(system: str, user: str, *, retries: int = 2) -> dict[str, Any]:
+def _llm_json(
+    system: str,
+    user: str,
+    *,
+    retries: int = 2,
+    domain: str | None = None,
+    purpose: str = "fast",
+) -> dict[str, Any]:
     """Invoke LLM and parse response as JSON, with retry + regex fallback.
 
     Args:
         system: System prompt text.
         user: User message text.
         retries: Number of retry attempts on parse/API failure.
+        domain: Optional "diet"/"workout" — routed through ``resolve_model``
+            so fine-tuned intent models can be swapped in per-domain.
+        purpose: Which model slot to resolve (default "fast").
 
     Returns:
         Parsed JSON dict, or empty dict on total failure.
     """
-    llm = ChatOpenAI(model=_FAST_MODEL, temperature=0)
+    llm = ChatOpenAI(model=resolve_model(purpose, domain=domain), temperature=0)
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
@@ -231,13 +313,11 @@ Step 5: "updated_{domain}_plan" — The plan was regenerated after changes.
   → Same as Step 4. "yes" → "confirm_{domain}". Changes → "update_{domain}".
 
 Step 6: "{domain}_confirmed" — Plan is confirmed. The system asked:
-  "Would you like to sync to Google Calendar, Google Fit, or both?
+  "Would you like to sync to Google Calendar?
    (or say 'done' to skip)".
-  → "calendar" / "google calendar" / "sync calendar" → "sync_{domain}_to_google_calendar"
-  → "fit" / "google fit" / "sync fit" → "sync_{domain}_to_google_fit"
-  → "both" / "yes" / "both please" / "do both" / "all" → "sync_{domain}_to_both"
-     (plain "yes" at this step means "both" — the user is agreeing to
-      the default sync offer.)
+  → "calendar" / "google calendar" / "sync calendar" / "yes" → "sync_{domain}_to_google_calendar"
+     (plain "yes" at this step means sync to Google Calendar — the user
+      is agreeing to the default sync offer.)
   → "done" / "no" / "skip" / "not now" / "later" → "skip_sync_{domain}"
   → "create a new plan" → "create_{domain}" (start over)
   → Questions about the plan ("what should I eat tomorrow", "show my
@@ -270,7 +350,7 @@ RULE 3 — Distinguish "get_{domain}" from "general_{domain}_query":
   "what exercises target glutes".
 
 RULE 4 — Sync requests require a confirmed plan:
-  "sync to calendar" / "sync to google fit" → only valid AFTER plan is confirmed.
+  "sync to calendar" → only valid AFTER plan is confirmed.
   If has_plan is NO, classify as "general_{domain}_query" instead.
 
 RULE 5 — "confirm_{domain}" requires a generated plan:
@@ -287,9 +367,7 @@ GENERAL CLASSIFICATION (when no critical rule applies)
 • Wants to see/retrieve plan OR asks about their own plan (e.g. "what should
   I eat tomorrow", "what's my workout today", "show me Monday's meals",
   "get my diet", "whats my routine") → "get_{domain}"
-• Sync to Google Calendar → "sync_{domain}_to_google_calendar"
-• Sync to Google Fit → "sync_{domain}_to_google_fit"
-• Sync to BOTH / plain "yes" at sync prompt → "sync_{domain}_to_both"
+• Sync to Google Calendar / plain "yes" at sync prompt → "sync_{domain}_to_google_calendar"
 • Skip / decline sync ("done", "no", "skip") → "skip_sync_{domain}"
 • Restore an archived/old plan — e.g. "restore vegan", "bring back my
   old plan", "reactivate my previous {domain} plan", "make my vegan
@@ -297,7 +375,7 @@ GENERAL CLASSIFICATION (when no critical rule applies)
 • General knowledge question NOT about user's plan, small talk → "general_{domain}_query"
 """
 
-    data = _llm_json(system, query)
+    data = _llm_json(system, query, domain=domain, purpose="fast")
 
     # Extract and validate intent
     raw_intent = str(data.get("user_intent", fallback_intent)).strip()
@@ -460,29 +538,20 @@ def answer_followup_question(
     Returns:
         The LLM's answer as a string.
     """
-    llm = ChatOpenAI(model=_PLAN_MODEL, temperature=0.4)
+    llm = ChatOpenAI(model=resolve_model("qa", domain=domain), temperature=0.4)
 
     if context and context.strip():
-        # Grounded generation: focused retrieved chunks get priority, but
-        # the full plan markdown is still available as a fallback so the
-        # LLM can find details the retriever might have missed (e.g. a
-        # specific day/meal that didn't rank in the top-k).
-        plan_block = (
-            f"\n\nFULL PLAN (fallback — use only if the retrieved "
-            f"context above doesn't cover the question):\n{plan_text}"
-            if plan_text else ""
-        )
         prompt = (
             f"The user has an active {domain} plan. Here is their profile:\n"
             f"{json.dumps(profile, indent=2)}\n\n"
-            f"RETRIEVED CONTEXT (ranked passages from their plan + memory):\n"
-            f"---\n{context}\n---"
-            f"{plan_block}\n\n"
+            f"Here is RETRIEVED CONTEXT from their plan and profile memory:\n"
+            f"---\n{context}\n---\n\n"
             f"The user is asking:\n\"{query}\"\n\n"
-            "Prefer the RETRIEVED CONTEXT. If it is incomplete, consult "
-            "the FULL PLAN. Only say the answer isn't available if "
-            "neither source contains it. Do NOT regenerate the full plan. "
-            "Keep the answer focused and concise. "
+            "Answer ONLY from the CONTEXT above and the profile. "
+            "If the context does not contain enough information to answer, "
+            "say so honestly and suggest what the user could ask for "
+            "instead. Do NOT regenerate the full plan. Keep the answer "
+            "focused and concise. "
             "NEVER use LaTeX (no \\text{}, \\textbf{}, $...$). "
             "Use plain markdown."
         )
@@ -613,7 +682,11 @@ def answer_plan_question(
     )
 
     try:
-        llm = ChatOpenAI(model=_FAST_MODEL, temperature=0.3, max_tokens=4096)
+        llm = ChatOpenAI(
+            model=resolve_model("qa", domain=domain),
+            temperature=0.3,
+            max_tokens=4096,
+        )
         resp = llm.invoke([
             SystemMessage(content=system),
             HumanMessage(content=user_msg),
@@ -656,7 +729,7 @@ def generate_plan(
     Returns:
         The generated plan as a string (markdown format).
     """
-    llm = ChatOpenAI(model=_PLAN_MODEL, temperature=0.5)
+    llm = ChatOpenAI(model=resolve_model("plan", domain=domain), temperature=0.5)
 
     if existing_plan:
         prompt = (
@@ -763,7 +836,11 @@ def generate_plan_name(
     user_msg = f"Goal: {goal}\nDomain: {domain}\nPlan excerpt:\n{snippet}"
 
     try:
-        llm = ChatOpenAI(model=_FAST_MODEL, temperature=0.8, max_tokens=30)
+        llm = ChatOpenAI(
+            model=resolve_model("fast", domain=domain),
+            temperature=0.8,
+            max_tokens=30,
+        )
         resp = llm.invoke([
             SystemMessage(content=system),
             HumanMessage(content=user_msg),
@@ -819,7 +896,7 @@ def generate_plan_as_json(
     Raises:
         ValueError: If all attempts fail to produce valid JSON.
     """
-    llm = ChatOpenAI(model=_PLAN_MODEL, temperature=0.5)
+    llm = ChatOpenAI(model=resolve_model("plan", domain=domain), temperature=0.5)
 
     if existing_plan:
         # Serialise existing plan for the LLM

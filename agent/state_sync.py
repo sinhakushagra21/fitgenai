@@ -32,9 +32,7 @@ logger = logging.getLogger("fitgen.state_sync")
 # deterministically dispatch the follow-up reply to the right tool.
 _COMPLETED_STEPS = frozenset({
     "diet_plan_synced_to_google_calendar",
-    "diet_plan_synced_to_google_fit",
     "workout_plan_synced_to_google_calendar",
-    "workout_plan_synced_to_google_fit",
 })
 
 

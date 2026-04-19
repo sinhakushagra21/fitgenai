@@ -36,7 +36,7 @@ Each tool internally:
 - Collects user profile data (name, age, sex, height, weight, goals, etc.)
 - Generates personalised plans using an LLM
 - Handles confirmations, updates, deletions, and follow-up questions
-- Manages Google Calendar and Google Fit sync
+- Manages Google Calendar sync
 
 You do NOT do any of the above. You ONLY route.
 </available_tools>
