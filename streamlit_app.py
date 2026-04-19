@@ -2271,6 +2271,7 @@ with st.sidebar:
                             "role": "assistant",
                             "content": _plan_md,
                             "tool_used": "diet_tool",
+                            "show_pdf": True,
                         })
                         st.rerun()
 
@@ -2297,6 +2298,7 @@ with st.sidebar:
                             "role": "assistant",
                             "content": _plan_md,
                             "tool_used": "workout_tool",
+                            "show_pdf": True,
                         })
                         st.rerun()
 
@@ -2765,16 +2767,18 @@ for i, entry in enumerate(st.session_state.chat_history):
             if entry.get("content"):
                 st.markdown(entry["content"])
                 _copy_button(entry["content"], key=f"copy_reply_{i}")
-                try:
-                    st.download_button(
-                        "⬇️ Download as PDF",
-                        data=_response_to_pdf(entry["content"]),
-                        file_name=f"fitgen_response_{i}.pdf",
-                        mime="application/pdf",
-                        key=f"dl_pdf_{i}",
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
+                if entry.get("show_pdf"):
+                    _pdf_src = entry.get("pdf_content") or entry["content"]
+                    try:
+                        st.download_button(
+                            "⬇️ Download as PDF",
+                            data=_response_to_pdf(_pdf_src),
+                            file_name=f"fitgen_plan_{i}.pdf",
+                            mime="application/pdf",
+                            key=f"dl_pdf_{i}",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
         else:
             st.markdown(entry["content"])
 
@@ -3163,12 +3167,49 @@ if prompt:
     # Skip persisting when the form will take over (profile questions
     # are handled by the form widget, not the chat history).
     if not _form_will_render:
+        # PDF download should appear only when the user has confirmed a plan
+        # (or it's already synced) OR when the user explicitly retrieved a
+        # plan via get_diet / get_workout. Everything else (profile intake,
+        # draft plans awaiting confirmation, follow-up Q&A, updates, sync
+        # prompts, refusals) should NOT show the PDF button.
+        _wf_for_pdf = st.session_state.agent_state.get("workflow", {}) or {}
+        _step_for_pdf = _wf_for_pdf.get("step_completed") or ""
+        _intent_for_pdf = _wf_for_pdf.get("intent") or ""
+        _domain_for_pdf = _wf_for_pdf.get("domain") or ""
+        _show_pdf = (
+            _step_for_pdf in {"diet_confirmed", "workout_confirmed"}
+            or "synced" in _step_for_pdf
+            or _intent_for_pdf in {"get_diet", "get_workout"}
+        )
+        # The response_content at confirm/sync time is a short ack
+        # ("Your plan is confirmed!"), not the plan itself. Resolve the
+        # actual plan markdown so the PDF contains the plan.
+        _pdf_content = ""
+        if _show_pdf:
+            _pdf_content = _wf_for_pdf.get("plan_text") or ""
+            if not _pdf_content and _domain_for_pdf and st.session_state.agent_state.get("user_email"):
+                try:
+                    _uid = st.session_state.agent_state.get("user_id") or ""
+                    if _domain_for_pdf == "diet":
+                        _latest = DietPlanRepository.find_latest_by_user(_uid, status="confirmed") if _uid else None
+                    elif _domain_for_pdf == "workout":
+                        _latest = WorkoutPlanRepository.find_latest_by_user(_uid, status="confirmed") if _uid else None
+                    else:
+                        _latest = None
+                    if _latest:
+                        _pdf_content = _latest.get("plan_markdown", "") or ""
+                except Exception:  # noqa: BLE001
+                    _pdf_content = ""
+            if not _pdf_content:
+                _pdf_content = response_content
         assistant_entry = {
             "role": "assistant",
             "content": response_content,
             "tool_used": tool_used or "",
             "technique_results": technique_results,
             "base_results": base_results,
+            "show_pdf": _show_pdf,
+            "pdf_content": _pdf_content,
         }
         if not (
             st.session_state.chat_history
