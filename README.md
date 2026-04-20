@@ -1,37 +1,151 @@
-# FITGEN.AI — Your AI-Powered Personal Fitness Coach
+# FITGEN.AI — Personalized AI Fitness Coach
 
-> **FITGEN.AI** is a conversational AI fitness assistant built with **LangGraph** and **OpenAI**. It designs personalised workout routines, nutrition plans, and recovery strategies by combining expert fitness knowledge with empathetic coaching.
+> **A production-grade, multi-agent fitness coaching system** built with LangGraph, OpenAI, MongoDB Atlas, Redis, and Personal RAG. FITGEN.AI generates deeply personalized diet and workout plans, remembers your profile across sessions, answers per-day questions via vector search, and syncs plans to Google Calendar — all through a conversational chat interface.
 
 ---
 
 ## Table of Contents
 
-1. [App Concept](#app-concept)
-2. [Project Structure](#project-structure)
-3. [Setup & Run](#setup--run)
-4. [System Prompt Engineering](#system-prompt-engineering)
-   - [Zero-Shot Prompting](#1-zero-shot-prompting)
-   - [Few-Shot Prompting](#2-few-shot-prompting)
-   - [Chain-of-Thought Prompting](#3-chain-of-thought-prompting)
-   - [Analogical Prompting](#4-analogical-prompting)
-   - [Generate-Knowledge Prompting](#5-generate-knowledge-prompting)
-5. [Advanced Techniques Applied](#advanced-techniques-applied)
-6. [Reflection on Prompt Effectiveness](#reflection-on-prompt-effectiveness)
+1. [Overview](#overview)
+2. [Key Features](#key-features)
+3. [Architecture](#architecture)
+4. [Tech Stack](#tech-stack)
+5. [Project Structure](#project-structure)
+6. [How It Works](#how-it-works)
+7. [Personal RAG System](#personal-rag-system)
+8. [MongoDB Schema](#mongodb-schema)
+9. [Prompting Techniques](#prompting-techniques)
+10. [Setup & Installation](#setup--installation)
+11. [Environment Variables](#environment-variables)
+12. [Running the App](#running-the-app)
+13. [Running Tests](#running-tests)
+14. [Fine-tuning](#fine-tuning)
+15. [Demo Flow](#demo-flow)
 
 ---
 
-## App Concept
+## Overview
 
-**FITGEN.AI** addresses a common problem: most people want to get fit but lack access to personalised, expert coaching. Generic fitness apps offer cookie-cutter plans, and personal trainers are expensive.
+FITGEN.AI is a conversational AI fitness assistant that goes beyond simple Q&A. It conducts a structured intake interview to build your profile, generates a full personalized plan (diet **or** workout), handles follow-up edits, answers day-specific questions using vector search over your own saved plan, and persists everything across browser sessions via MongoDB.
 
-FITGEN.AI bridges this gap by acting as an always-available AI fitness coach that:
+The system uses a **deterministic router + specialist tools** architecture — a fast LLM classifier routes every user message to the correct domain tool, which then runs a multi-turn state machine. This is cheaper (90% cost savings vs. always using GPT-4), more predictable, and easier to test than pure LLM-driven agents.
 
-- **Assesses** the user's fitness level, goals, equipment, and constraints through natural conversation.
-- **Designs** customised workout plans, nutrition guidance, and recovery protocols.
-- **Educates** users on the *why* behind each recommendation using exercise science.
-- **Adapts** in real-time based on user feedback, injuries, or schedule changes.
+---
 
-The system is powered by a LangGraph-based agent with a carefully engineered system prompt that was developed by applying and evaluating multiple prompting techniques.
+## Key Features
+
+| Feature | Details |
+|---|---|
+| **Personalized Plan Generation** | Diet and workout plans tailored to your age, weight, goals, dietary restrictions, experience level, schedule, and more |
+| **Multi-Turn Profile Intake** | Guided Q&A collects all required fields before generating a plan; missing fields are asked one at a time |
+| **Persistent User Profiles** | MongoDB stores your base profile, diet profile, and workout profile — returning users skip already-answered questions |
+| **Personal RAG** | Your saved plans are chunked, embedded (text-embedding-3-small, 1536-dim), and stored in MongoDB Atlas Vector Search. Ask "what's my Thursday workout?" and get a precise answer |
+| **Model C Plan Resolver** | Fuzzy LLM matching across active and archived plans using descriptors (e.g. "my old vegan plan"). Archived plans can be restored with one word |
+| **One-Active-Plan Invariant** | Each domain (diet / workout) has exactly one active plan. Creating a new plan auto-archives the previous one and reactivates the correct RAG chunks |
+| **Plan Update & Versioning** | Edit your plan in natural language ("add more protein on rest days"); changes are saved to MongoDB and the RAG index is refreshed |
+| **Google Calendar Sync** | Confirm your diet plan → meals are created as calendar events via Google OAuth |
+| **YouTube Video Enrichment** | Workout plans are enriched with relevant YouTube tutorial links, cached in Redis (30-day TTL) |
+| **Plan Export** | Download your plan as a PDF from the Streamlit UI |
+| **Plan Deletion** | Delete a plan with a confirmation gate; MongoDB and RAG index are cleaned up |
+| **Active-Turn Gate** | While mid-flow (e.g., creating a diet plan), you can ask a cross-domain question ("get my workout for Tuesday") — the gate routes it as a side query and resumes the diet intake after |
+| **Scope Guardrails** | Off-topic requests (e.g., "write me a Python script") are politely declined and redirected to fitness/nutrition |
+| **LangSmith Tracing** | Optional end-to-end tracing of every LangGraph step, tool invocation, and LLM call |
+| **Terminal CLI** | Run FITGEN.AI without Streamlit via `app.py` |
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        User Message                                  │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     LangGraph Graph                                  │
+│                                                                      │
+│   START ──► Router Node ──► Tool Node(s) ──► State Sync ──► END     │
+│                │                │                                    │
+│                │         ┌──────┴──────┐                             │
+│                │         │             │                             │
+│                │    Diet Tool     Workout Tool                       │
+│                │         │             │                             │
+│                │    Multi-turn     Multi-turn                        │
+│                │    State Machine  State Machine                     │
+│                │                                                     │
+│   Active-Turn Gate (LLM) decides:                                   │
+│     stay | switch | side_diet | side_workout | direct               │
+└─────────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────┐   ┌────────────────────────┐
+│         MongoDB Atlas                │   │      Redis Cloud       │
+│                                      │   │                        │
+│  users            ← profile store    │   │  YouTube URL cache     │
+│  diet_plans       ← plan store       │   │  (30-day TTL)          │
+│  workout_plans    ← plan store       │   └────────────────────────┘
+│  sessions         ← context state    │
+│  plan_chunks_vec  ← RAG embeddings   │
+│  user_memory_vec  ← user memory      │
+│  messages         ← chat history     │
+└──────────────────────────────────────┘
+```
+
+### Router Node
+
+Every user message goes through the **Router** (`agent/router.py`), which:
+
+1. **Active-Turn Gate** — If there's an active multi-turn workflow (e.g., diet intake in progress), a fast LLM decides: `stay` (continue workflow), `switch` (abandon and start new), `side_diet` / `side_workout` (answer out-of-band without disturbing the workflow), or `direct` (pass through as a general query).
+
+2. **Intent Classification** — Routes to the correct domain tool (`diet_tool` or `workout_tool`) with the correct intent (`create_diet`, `update_diet`, `get_diet`, `confirm_diet`, `delete_diet`, `restore_diet_plan`, etc.).
+
+### Specialist Tools
+
+Each domain tool (`diet_tool.py`, `workout_tool.py`) is a multi-turn state machine with 10+ handlers mapped 1-to-1 with intents. Each handler:
+- Reads from `DietSessionContext` / `WorkoutSessionContext` (hydrated from AgentState + MongoDB)
+- Performs its action (ask questions, generate plan, update plan, save to DB, etc.)
+- Returns a `ToolMessage` with JSON `state_updates`
+
+### State Sync Bridge
+
+After every tool call, `state_sync.py` extracts the `state_updates` JSON from the `ToolMessage` and deep-merges it into `AgentState`. The `StateManager` then persists the updated state to MongoDB sessions.
+
+---
+
+## Tech Stack
+
+### Core
+| Layer | Technology |
+|---|---|
+| Agent Framework | **LangGraph** 0.2+ (graph execution, streaming) |
+| LLM — Planning | **OpenAI gpt-5.1** (plan generation, complex reasoning) |
+| LLM — Routing | **OpenAI gpt-4.1-mini** (intent classification, validation, profile extraction) |
+| Embeddings | **OpenAI text-embedding-3-small** (1536 dimensions) |
+| LLM Abstractions | **LangChain** 0.3+ |
+
+### Storage
+| Layer | Technology |
+|---|---|
+| Primary Database | **MongoDB Atlas** (users, plans, sessions, embeddings) |
+| Vector Search | **MongoDB Atlas Vector Search** (cosine similarity, 1536-dim, `plan_chunks_vec`) |
+| Cache | **Redis Cloud** (YouTube URL cache, 30-day TTL) |
+
+### Frontend
+| Layer | Technology |
+|---|---|
+| Web UI | **Streamlit** 1.35+ |
+| Plan Export | **pdfkit** (PDF generation) |
+| Visualization | **matplotlib** (plan charts) |
+| Calendar | **Google Calendar API** (OAuth 2.0) |
+
+### Testing
+| Layer | Technology |
+|---|---|
+| Test Runner | **pytest** 8.0+ |
+| MongoDB Mock | **mongomock** 4.1+ (in-memory MongoDB for unit tests) |
+| Mocking | **pytest-mock** |
+| Coverage | **pytest-cov** |
 
 ---
 
@@ -39,355 +153,597 @@ The system is powered by a LangGraph-based agent with a carefully engineered sys
 
 ```
 FITGEN.AI/
-├── .env.example            # Template for required env vars (API keys)
-├── .gitignore
-├── requirements.txt        # Python dependencies
-├── README.md               # This document
 │
-├── app.py                  # Entry-point — runs the conversational loop
+├── app.py                        # Terminal CLI entry point
+├── streamlit_app.py              # Streamlit web UI (3,200+ lines)
+├── requirements.txt              # Python dependencies
+├── pytest.ini                    # Test configuration
+├── .env.example                  # Environment variable template
 │
-└── agent/
-    ├── __init__.py
-    ├── graph.py            # LangGraph graph definition & system prompt
-    └── state.py            # Shared state schema (TypedDict)
+├── agent/
+│   ├── state.py                  # AgentState TypedDict definition
+│   ├── state_manager.py          # State hydration, merging & MongoDB persistence
+│   ├── state_sync.py             # Tool JSON → AgentState bridge
+│   ├── router.py                 # Active-turn gate + intent classifier
+│   ├── graph.py                  # LangGraph graph definition
+│   ├── config.py                 # Model tier configuration (PLAN_MODEL, FAST_MODEL)
+│   ├── persistence.py            # MongoDB persistence facade
+│   ├── tracing.py                # LangSmith integration
+│   ├── logging_config.py         # Colored logging setup
+│   ├── error_utils.py            # Structured exception handling
+│   ├── feedback.py               # User feedback collection
+│   ├── diet_visuals.py           # Diet plan charts
+│   ├── workout_visuals.py        # Workout plan charts
+│   │
+│   ├── tools/
+│   │   ├── __init__.py           # ALL_TOOLS registry
+│   │   ├── diet_tool.py          # Diet domain — 10+ intent handlers
+│   │   ├── workout_tool.py       # Workout domain — 10+ intent handlers
+│   │   ├── calendar_integration.py  # Google Calendar event creation
+│   │   └── youtube_service.py    # YouTube tutorial link enrichment (Redis-cached)
+│   │
+│   ├── db/
+│   │   ├── mongo.py              # MongoClient singleton (connection pooling)
+│   │   ├── models.py             # Pydantic schemas (User, Plan, Session, Chunk)
+│   │   └── repositories/
+│   │       ├── user_repo.py           # users collection CRUD
+│   │       ├── diet_plan_repo.py      # diet_plans CRUD + archive/confirm/restore
+│   │       ├── workout_plan_repo.py   # workout_plans CRUD + archive/confirm/restore
+│   │       ├── session_repo.py        # sessions (context state persistence)
+│   │       ├── plan_chunks_repo.py    # plan embeddings + RAG chunk management
+│   │       ├── user_memory_repo.py    # persistent user memory
+│   │       └── feedback_repo.py       # user ratings & feedback
+│   │
+│   ├── rag/
+│   │   ├── retriever.py          # FAISS / NumPy vector search (static knowledge)
+│   │   ├── knowledge_base.py     # Static fitness knowledge documents
+│   │   └── personal/
+│   │       ├── chunker.py        # Plan Markdown → sections with metadata
+│   │       ├── embedder.py       # Text → OpenAI embeddings
+│   │       ├── indexer.py        # Chunk indexing pipeline
+│   │       ├── schema.py         # Chunk metadata schema
+│   │       ├── retriever.py      # Vector search on plan_chunks_vec
+│   │       └── plan_resolver.py  # Model C: fuzzy LLM match over archived plans
+│   │
+│   ├── cache/
+│   │   └── redis_client.py       # Redis singleton + YouTube URL cache helpers
+│   │
+│   ├── prompts/
+│   │   ├── base_prompts.py       # 6 prompting technique variants (zero-shot → decomposition)
+│   │   ├── diet_prompts.py       # Diet plan generation & intake prompts
+│   │   ├── workout_prompts.py    # Workout plan generation (per-day H3 format)
+│   │   └── techniques.py         # Technique metadata for UI selector
+│   │
+│   ├── shared/
+│   │   ├── types.py              # DietIntent, WorkoutIntent Literals + field lists
+│   │   ├── llm_helpers.py        # Intent classification, profile extraction, plan Q&A
+│   │   ├── plan_generation_loop.py  # Multi-turn plan refinement loop
+│   │   ├── plan_evaluator.py     # Plan quality scoring
+│   │   ├── profile_utils.py      # Profile validation & assembly
+│   │   ├── plan_data.py          # Structured plan extraction from Markdown
+│   │   └── response_builder.py   # Response formatting helpers
+│   │
+│   ├── auth/
+│   │   ├── base.py               # Abstract auth class
+│   │   └── google_auth.py        # Google OAuth 2.0 flow
+│   │
+│   └── safety/
+│       └── guardrails.py         # Content filtering & scope redirect
+│
+├── scripts/
+│   ├── backfill_plan_chunks.py   # Rebuild RAG index for existing plans
+│   └── backfill_user_memory.py   # Backfill user memory collection
+│
+├── tests/                        # 19 test files, 220+ tests, mongomock
+│   ├── conftest.py               # Shared fixtures
+│   ├── test_router.py
+│   ├── test_state_sync.py
+│   ├── test_persistence.py
+│   ├── test_plan_generation_loop.py
+│   ├── test_plan_evaluator.py
+│   ├── test_chunker.py
+│   ├── test_retriever.py
+│   ├── test_plan_chunks_repo.py
+│   ├── test_auth.py
+│   ├── test_conversation_workflow.py
+│   └── ...
+│
+├── fine_tuning/                  # OpenAI fine-tuning utilities
+│   ├── prepare_finetune_data.py
+│   ├── run_finetune.py
+│   ├── mine_plan_training_data.py
+│   └── compare_models.py
+│
+├── flow_engineering/             # PromptFlow experiments
+└── evaluation/                   # Evaluation scripts & metrics
 ```
 
 ---
 
-## Setup & Run
+## How It Works
+
+### Creating a Diet Plan (end-to-end)
+
+```
+User:  "Create a high-protein vegan diet plan for muscle gain"
+  │
+  ▼
+Router  →  intent: create_diet  →  diet_tool
+  │
+  ▼
+diet_tool checks MongoDB profile:
+  - base fields already filled? → skip those questions
+  - diet-specific fields missing? → ask one at a time
+
+User:  "I have a nut allergy and prefer Indian cooking"
+User:  "I can cook for 30 minutes per day"
+User:  "I eat 3 meals a day"
+  │
+  ▼
+Profile complete → generate_plan_with_feedback()
+  - gpt-5.1 generates full Markdown plan with macros table
+  - Plan evaluator scores it (completeness, safety, personalization)
+  - If score < threshold → refinement loop (up to 3 iterations)
+  │
+  ▼
+Plan stored in diet_plans (status: "draft")
+Plan chunked → embedded → stored in plan_chunks_vec
+  │
+  ▼
+User:  "yes"  →  confirm_diet
+  - Profile saved to users.diet_profile in MongoDB
+  - Plan status → "confirmed"
+  - Google Calendar sync prompt
+
+User:  "skip"  →  done ✓
+
+User (later):  "what should I eat for lunch on Wednesday?"
+  │
+  ▼
+Router → get_diet → RAG retrieval on plan_chunks_vec
+  - Filters by user_id, domain=diet
+  - Cosine similarity search → top-k chunks for "Wednesday lunch"
+  - LLM answers from retrieved chunks + full plan fallback
+```
+
+### Multi-Turn Workflow State Machine
+
+Each domain tool tracks the current step via `workflow["step_completed"]`:
+
+```
+idle
+  └─► profile_intake_started
+        └─► profile_complete
+              └─► diet_plan_generated  (draft in MongoDB)
+                    └─► diet_plan_confirmed  (confirmed in MongoDB)
+                          └─► diet_plan_synced_to_google_calendar
+```
+
+Any user message during this flow is interpreted in context (e.g., "yes" means "confirm the plan", not a generic affirmation).
+
+---
+
+## Personal RAG System
+
+FITGEN.AI's most novel feature is its **personal RAG pipeline** — each user's own saved plans become a searchable knowledge base.
+
+### Chunking
+
+Plans are split into semantic sections by heading level:
+
+```markdown
+## Training Schedule
+
+### Monday — Push Day
+| Exercise | Sets x Reps | Rest | Notes |
+...
+
+### Thursday — Pull Day
+| Exercise | Sets x Reps | Rest | Notes |
+...
+```
+
+Each `### <DayName> — <Session>` block becomes one chunk with metadata:
+
+```json
+{
+  "plan_id": "...",
+  "user_id": "...",
+  "domain": "workout",
+  "section": "workout_day",
+  "day_of_week": "monday",
+  "text": "### Monday — Push Day\n..."
+}
+```
+
+### Embedding & Storage
+
+Chunks are embedded with `text-embedding-3-small` (1536-dim) and stored in MongoDB `plan_chunks_vec` with a vector index configured for cosine similarity.
+
+### Retrieval
+
+When a user asks "what's my Thursday workout?":
+1. Query is embedded
+2. MongoDB Atlas Vector Search runs cosine similarity over the user's chunks
+3. Top-k chunks with `day_of_week=thursday` are returned
+4. LLM answers from retrieved context
+5. If RAG returns nothing → falls back to full plan Markdown from MongoDB (logged as `RAG empty — falling back`)
+
+### Model C Plan Resolver
+
+When a user references an archived plan by descriptor ("my old keto plan", "the omnivore plan from last week"):
+1. `PlanResolver.resolve_plan()` fetches all active + archived plans for the user
+2. A fast LLM fuzzy-matches the query against plan names and `profile_snapshot` fields
+3. Returns the matched plan + `is_archived` flag
+4. If archived, appends "Reply **restore** to make this your active plan"
+5. On "restore" intent → archive current active plan → reactivate stored plan → swap RAG chunks
+
+---
+
+## MongoDB Schema
+
+### `users` collection
+```json
+{
+  "_id": "ObjectId",
+  "email": "user@example.com",
+  "base_profile": {
+    "name": "Alex",
+    "age": 28,
+    "sex": "male",
+    "height_cm": 178,
+    "weight_kg": 75,
+    "goal": "muscle_gain",
+    "sleep_hours": 7,
+    "stress_level": "medium",
+    "job_type": "sedentary"
+  },
+  "diet_profile": {
+    "diet_preference": "vegan",
+    "allergies": ["nuts"],
+    "meals_per_day": 3,
+    "cooking_time": 30,
+    "favourite_meals": "Indian food",
+    "foods_to_avoid": "",
+    "exercise_frequency": "4x/week",
+    "alcohol_intake": "none"
+  },
+  "workout_profile": {
+    "experience_level": "intermediate",
+    "training_days_per_week": 4,
+    "session_duration": 60,
+    "daily_steps": 8000
+  },
+  "created_at": "ISODate",
+  "updated_at": "ISODate"
+}
+```
+
+### `diet_plans` / `workout_plans` collections
+```json
+{
+  "_id": "ObjectId",
+  "user_id": "ObjectId",
+  "session_id": "uuid",
+  "status": "confirmed",
+  "plan_markdown": "## Your Diet Plan\n...",
+  "profile_snapshot": {},
+  "structured_data": {},
+  "calendar_synced": false,
+  "created_at": "ISODate",
+  "confirmed_at": "ISODate",
+  "archived_at": null
+}
+```
+
+> `status` is one of: `draft` | `confirmed` | `archived`
+
+### `plan_chunks_vec` collection
+```json
+{
+  "_id": "ObjectId",
+  "plan_id": "ObjectId",
+  "user_id": "ObjectId",
+  "domain": "workout",
+  "section": "workout_day",
+  "day_of_week": "thursday",
+  "text": "### Thursday — Pull Day\n...",
+  "embedding": [0.021, -0.043, "...1536 floats"],
+  "status": "active",
+  "created_at": "ISODate"
+}
+```
+
+---
+
+## Prompting Techniques
+
+FITGEN.AI implements and compares **6 prompting techniques** in `agent/prompts/base_prompts.py`. These can be selected from the Streamlit UI sidebar for experimentation:
+
+| Technique | Description |
+|---|---|
+| **Zero-Shot** | Role + task only, no examples. Fast and cheap. |
+| **Few-Shot** | Role + 6 routing examples covering edge cases |
+| **Chain-of-Thought (CoT)** | Explicit step-by-step reasoning before answering |
+| **Analogical** | "Act like a fitness concierge at a 5-star hotel" framing |
+| **Generate-Knowledge** | Generate relevant domain knowledge first, then answer |
+| **Decomposition** | Break complex requests into sub-tasks before solving |
+
+These are especially visible in the router's intent classification, where the technique selection changes how the LLM reasons about ambiguous inputs.
+
+---
+
+## Setup & Installation
+
+### Prerequisites
+
+- Python 3.10+ (3.11 recommended; FAISS unavailable on 3.13+, NumPy fallback used automatically)
+- MongoDB Atlas account (free tier M0 works)
+- Redis Cloud account (free tier works) or local Redis
+- OpenAI API key
+- Google Cloud project with Calendar API enabled *(optional, for calendar sync)*
+
+### 1. Clone the repository
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/your-username/FITGEN.AI.git
-cd FITGEN.AI
+git clone https://github.com/sinhakushagra21/fitgenai.git
+cd fitgenai
+```
 
-# 2. Create a virtual environment
-python -m venv venv
-source venv/bin/activate
+### 2. Create a virtual environment
 
-# 3. Install dependencies
+```bash
+python -m venv .venv
+source .venv/bin/activate        # macOS/Linux
+.venv\Scripts\activate           # Windows
+```
+
+### 3. Install dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# 4. Configure environment variables
+> **Note:** On Python 3.13+, `faiss-cpu` will not install. The system automatically falls back to a NumPy-based vector search — all features remain functional.
+
+### 4. Configure environment variables
+
+```bash
 cp .env.example .env
-# Edit .env and add your OpenAI API key
+# Edit .env with your credentials
+```
 
-# 5. Run the app
+### 5. Set up MongoDB Atlas Vector Search index
+
+In MongoDB Atlas, create a vector search index on the `plan_chunks_vec` collection with this definition:
+
+```json
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 1536,
+      "similarity": "cosine"
+    },
+    { "type": "filter", "path": "user_id" },
+    { "type": "filter", "path": "domain" },
+    { "type": "filter", "path": "status" },
+    { "type": "filter", "path": "day_of_week" }
+  ]
+}
+```
+
+> Index name must be: **`plan_chunks_vector_index`**
+
+### 6. Verify connections
+
+```bash
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
+from agent.db.mongo import get_db
+from agent.cache.redis_client import get_redis
+db = get_db()
+print('MongoDB OK — collections:', db.list_collection_names())
+r = get_redis(); r.ping()
+print('Redis OK')
+"
+```
+
+---
+
+## Environment Variables
+
+Create a `.env` file in the project root (**never commit this file**):
+
+```bash
+# ── Required ───────────────────────────────────────────────────────
+OPENAI_API_KEY=sk-...
+
+# ── MongoDB ────────────────────────────────────────────────────────
+MONGO_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/
+MONGO_DB_NAME=fitgen_ai
+
+# ── Redis ──────────────────────────────────────────────────────────
+REDIS_URL=redis://default:<password>@<host>:<port>/0
+
+# ── LangSmith Tracing (optional) ──────────────────────────────────
+LANGCHAIN_API_KEY=ls__...
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_PROJECT=FITGEN-AI
+
+# ── Model Overrides (optional — defaults shown) ────────────────────
+FITGEN_PLAN_MODEL=gpt-5.1
+FITGEN_FAST_MODEL=gpt-4.1-mini
+
+# ── App Config (optional) ──────────────────────────────────────────
+FITGEN_USER_EMAIL=you@example.com    # Pre-set email; skips email prompt
+FITGEN_LOG_BUFFER=1000               # Log lines kept in Streamlit sidebar
+YOUTUBE_CACHE_TTL_DAYS=30            # Redis cache TTL for YouTube links
+```
+
+---
+
+## Running the App
+
+### Streamlit Web UI (recommended)
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Open `http://localhost:8501` in your browser.
+
+**UI features:**
+- Chat interface with streaming responses
+- Prompting technique selector (sidebar)
+- Real-time log viewer (sidebar)
+- PDF export button (after plan is confirmed)
+- Feedback / rating widget after each response
+- Plan visualization charts
+
+### Terminal CLI
+
+```bash
 python app.py
 ```
 
----
-
-## System Prompt Engineering
-
-The FITGEN.AI system prompt was developed iteratively by applying five foundational prompting techniques to the same task: *"Design a system prompt for an AI fitness coach."* Each technique shaped a different aspect of the final prompt.
-
-### 1. Zero-Shot Prompting
-
-**Technique:** Provide the model with a task description and no examples. Rely on the model's pre-trained knowledge to generate the response.
-
-**Prompt Used:**
-```
-You are FITGEN.AI, an expert AI fitness coach and wellness advisor.
-Design personalised workout routines, nutrition plans, and recovery
-strategies. Prioritise safety and evidence-based recommendations.
-```
-
-**Sample Response (model output):**
-```
-Sure! I'd be happy to help you with your fitness goals. Could you
-tell me:
-1. What is your current fitness level?
-2. What are your primary goals?
-3. Do you have any injuries or limitations?
-4. What equipment do you have access to?
-```
-
-**Observations:**
-- The model understood the role and asked reasonable intake questions.
-- Responses were *generic* — they lacked structure, depth, and personality.
-- No consistent format for delivering plans (sometimes bullets, sometimes paragraphs).
-- **Verdict:** Good starting point, but too vague for production.
+Runs the same LangGraph agent in a terminal REPL. Useful for debugging and scripting.
 
 ---
 
-### 2. Few-Shot Prompting
+## Running Tests
 
-**Technique:** Provide 2–3 example exchanges that demonstrate the ideal interaction style, structure, and depth.
+```bash
+# Run all tests
+pytest tests/ -v
 
-**Prompt Used (appended to Zero-Shot base):**
-```
-Below are examples of ideal exchanges. Mirror this style:
+# Run with coverage report
+pytest tests/ -v --cov=agent --cov-report=term-missing
 
---- Example 1 ---
-User: "I'm a complete beginner. I want to lose weight but I only
-have dumbbells at home and 30 minutes a day."
+# Run a specific test file
+pytest tests/test_router.py -v
 
-FITGEN.AI: "Great starting point! Here's a 4-week beginner plan:
-
-Weeks 1-2 — Foundation Phase
-| Day | Focus        | Key Exercises                        | Sets × Reps |
-|-----|-------------|--------------------------------------|-------------|
-| Mon | Full Body A | Goblet Squats, DB Rows, Floor Press  | 3 × 12      |
-| Wed | Full Body B | DB Deadlifts, Shoulder Press, Lunges | 3 × 12      |
-| Fri | Full Body C | DB Swings, Push-ups, Plank (30 s)    | 3 × 10-12   |
-
-Pair this with a modest calorie deficit (~300-500 kcal)
-and aim for 0.8 g protein per lb of body weight."
-
---- Example 2 ---
-User: "How much protein do I need to build muscle?"
-
-FITGEN.AI: "Current evidence suggests 0.7-1.0 g per pound of body
-weight. If you weigh 170 lbs, aim for 120-170 g/day spread across
-3-5 meals."
+# Run tests matching a keyword
+pytest tests/ -k "chunker" -v
 ```
 
-**Sample Response (model output for "I want to gain muscle but I'm vegetarian"):**
-```
-Absolutely! Here's a muscle-building approach for vegetarians:
-
-**Protein Sources (aim for 0.8-1.0 g/lb):**
-| Food           | Protein per serving |
-|---------------|-------------------|
-| Lentils (1 cup) | 18 g             |
-| Greek Yogurt    | 15-20 g          |
-| Tofu (½ block)  | 20 g             |
-| Quinoa (1 cup)  | 8 g              |
-
-**Sample Day:**
-- Breakfast: Greek yogurt parfait (20 g protein)
-- Lunch: Lentil & quinoa bowl (26 g protein)
-- Dinner: Tofu stir-fry with edamame (30 g protein)
-- Snacks: Protein shake + almonds (25 g protein)
-
-Total: ~101 g — supplement with a plant-based protein powder to hit
-your target.
-```
-
-**Observations:**
-- **Dramatic improvement** in structure and consistency — the model mirrored the table format and concise style.
-- Responses became more *actionable* with specific numbers and meal plans.
-- Few-shot examples act as a powerful "style guide" for the model.
-- **Verdict:** Essential technique; the quality jump from Zero-Shot to Few-Shot was the most impactful.
+**Test infrastructure:**
+- All MongoDB interactions use `mongomock` — no live DB required
+- LLM calls are mocked via `pytest-mock`
+- 220+ tests across 19 files covering routing, state sync, persistence, RAG chunking, plan generation, auth, and end-to-end workflows
 
 ---
 
-### 3. Chain-of-Thought Prompting
+## Fine-tuning
 
-**Technique:** Instruct the model to reason through the problem step-by-step before presenting the answer.
+The `fine_tuning/` directory contains utilities for fine-tuning the plan generation model on real user-confirmed plans:
 
-**Prompt Used (appended to Few-Shot base):**
-```
-When generating any plan, follow these reasoning steps:
-1. Understand — Restate the user's goal, constraints, and context.
-2. Recall Knowledge — Surface relevant exercise science principles.
-3. Decompose — Break into sub-problems (muscle groups, macros, etc.).
-4. Plan — Draft structured answer (sets, reps, rest, alternatives).
-5. Verify — Self-check for safety, balance, and goal alignment.
-6. Present — Deliver the final answer clearly.
-```
+```bash
+# Step 1: Mine confirmed plans from MongoDB as training data
+python fine_tuning/mine_plan_training_data.py
 
-**Sample Response (model output for "Design a 4-day upper/lower split for intermediate lifters"):**
-```
-Let me work through this step by step:
+# Step 2: Prepare JSONL fine-tuning dataset
+python fine_tuning/prepare_finetune_data.py
 
-**Understanding your request:** You're an intermediate lifter looking
-for a 4-day upper/lower split — this suggests you have a solid
-training base and can handle higher volume.
+# Step 3: Launch OpenAI fine-tuning job
+python fine_tuning/run_finetune.py
 
-**Key principles at play:**
-- Intermediate lifters benefit from 10-20 sets per muscle group/week
-- Upper/Lower splits allow each muscle group to be trained 2×/week
-- Progressive overload should target 2.5-5 lb increases bi-weekly
-
-**Here's your programme:**
-
-**Day 1 — Upper Strength**
-| Exercise          | Sets × Reps | Rest  |
-|------------------|-------------|-------|
-| Barbell Bench    | 4 × 5       | 3 min |
-| Barbell Row      | 4 × 5       | 3 min |
-| OHP              | 3 × 8       | 2 min |
-| Weighted Pull-up | 3 × 6-8     | 2 min |
-| Face Pulls       | 3 × 15      | 1 min |
-
-[... Day 2-4 follow similar structure ...]
-
-**Safety check:** All movements are bilateral with no excessive spinal
-loading. I've included face pulls for shoulder health and balanced
-push/pull ratios.
+# Step 4: Compare base vs. fine-tuned model on sample prompts
+python fine_tuning/compare_models.py
 ```
 
-**Observations:**
-- CoT produced **more thorough and well-reasoned** plans.
-- The model naturally surfaced relevant principles (*why* this split works, not just *what* to do).
-- Self-verification step caught potential issues (e.g., imbalanced push/pull).
-- Slight downside: responses became longer. We addressed this by instructing the model to keep reasoning *brief* unless asked.
-- **Verdict:** Critical for complex queries; significantly improved answer quality and trustworthiness.
+Fine-tuned model IDs are saved in `fine_tuning/data/` and can be set via the `FITGEN_PLAN_MODEL` env var.
 
 ---
 
-### 4. Analogical Prompting
+## Demo Flow
 
-**Technique:** Instruct the model to use real-world analogies when explaining complex concepts to improve user comprehension.
+The five scenarios below cover the full range from happy-path to edge cases:
 
-**Prompt Used (appended to CoT base):**
+### 1. Happy-Path Workout Plan Creation
 ```
-When explaining complex fitness or nutrition concepts, use relatable
-real-world analogies. For example:
-- Compare progressive overload to gradually adding pages to a book
-  you carry every day.
-- Compare rest and recovery to charging a phone — you can't run at
-  100% if you never plug in.
+"Create a workout plan"
+→ [answer profile questions]
+→ Plan generated with per-day sections (### Monday — Push Day, ### Thursday — Pull Day, ...)
+"yes"
+→ Confirmed + saved to MongoDB + RAG chunks indexed in plan_chunks_vec
+"skip"
+→ Workflow complete
 ```
-
-**Sample Response (model output for "Why do I need rest days?"):**
-```
-Great question — and one that many eager gym-goers struggle with!
-
-**The Science:** When you train, you create microscopic tears in
-muscle fibres. Growth happens during *recovery*, not during the
-workout itself. This process (muscle protein synthesis) peaks
-24-48 hours post-training.
-
-🔋 **Think of it like charging your phone.** Your workout drains the
-battery. Rest days are when you plug in and recharge. If you keep
-using your phone at 5% battery, it eventually shuts down. Your body
-works the same way — without rest, you hit overtraining: fatigue,
-injury, and stalled progress.
-
-**Practical guidelines:**
-- Beginners: 2-3 rest days per week
-- Intermediate: 1-2 rest days (active recovery counts)
-- Advanced: At least 1 full rest day + deload weeks every 4-6 weeks
-
-🏗️ *Another way to think about it: you wouldn't expect a construction
-crew to build 24/7 without breaks. Quality work requires
-downtime.*
-```
-
-**Observations:**
-- Analogies made technical concepts **immediately relatable**, especially for beginners.
-- The phone battery and construction crew analogies were the most effective — they were simple and universally understood.
-- Risk: overuse of analogies can feel patronising for advanced users. We added the guideline "use analogies selectively."
-- **Verdict:** Excellent for educational content and beginner audiences; adds a warm, approachable tone.
+*Covers: profile intake, plan generation, per-day H3 prompt format, confirmation, MongoDB + vector indexing.*
 
 ---
 
-### 5. Generate-Knowledge Prompting
-
-**Technique:** Instruct the model to internally generate 2–3 relevant knowledge statements (grounded in science) before answering, and weave them into the response.
-
-**Prompt Used (appended to Analogical base):**
+### 2. Day-Specific RAG Retrieval
 ```
-Before answering any technical fitness or nutrition question,
-internally generate 2-3 relevant knowledge statements grounded in
-exercise science. Use these as the factual basis for your response.
-
-Example knowledge statements:
-- "Progressive overload is the gradual increase of stress placed
-  upon the body during training."
-- "A caloric surplus of ~250-500 kcal above maintenance is
-  recommended for lean muscle gain."
+"What's my Thursday workout?"
+→ Vector search on plan_chunks_vec filtered by day_of_week=thursday
+→ Precise answer from the retrieved chunk
 ```
-
-**Sample Response (model output for "How should I train to run a faster 5K?"):**
-```
-Let me pull together the key principles first:
-
-📚 **Relevant Exercise Science:**
-1. *The SAID principle* — your body adapts specifically to the
-   demands placed on it. To run faster, you must train at or near
-   race pace.
-2. *VO₂ max improvement* — interval training at 90-95% max heart
-   rate is the most effective way to increase aerobic capacity.
-3. *Running economy* — strength training (especially plyometrics)
-   improves neuromuscular efficiency and stride power.
-
-**Your 5K Speed Programme (8 Weeks):**
-
-| Day | Session          | Details                            |
-|-----|------------------|------------------------------------|
-| Mon | Easy Run         | 3-4 mi at conversational pace      |
-| Tue | Interval Training| 6 × 800 m at goal pace, 2 min rest |
-| Wed | Strength + Core  | Squats, lunges, box jumps, planks  |
-| Thu | Tempo Run        | 2 mi at "comfortably hard" pace    |
-| Fri | Rest             |                                    |
-| Sat | Long Run         | 5-6 mi at easy pace                |
-| Sun | Active Recovery  | Light yoga or walk                 |
-
-**Why this works:** The intervals target VO₂ max (principle #2),
-the tempo run builds lactate threshold, and the strength day
-improves running economy (principle #3). Easy runs build your
-aerobic base without excess fatigue.
-```
-
-**Observations:**
-- GK prompting produced the most **scientifically grounded** responses.
-- Responses explained the *why* behind every recommendation, building user trust.
-- The generated knowledge acted as an internal fact-check, reducing the chance of hallucination.
-- **Verdict:** Essential for any fitness AI; the combination of GK + CoT yielded the most reliable and educational answers.
+*Covers: Personal RAG, day-tagged chunk retrieval, MongoDB fallback if RAG misses.*
 
 ---
 
-## Advanced Techniques Applied
-
-After developing the initial system prompt using the five foundational techniques above, we applied advanced techniques to improve robustness and production-readiness:
-
-### Decomposition
-Complex user requests (e.g., "Design me a 12-week transformation plan") are automatically broken into sub-tasks: assessment → goal-setting → programme design → nutrition → recovery → progress tracking. This prevents the model from generating an overwhelming monolithic response and ensures nothing is missed.
-
-### Self-Consistency
-When multiple valid approaches exist (e.g., PPL vs. Upper/Lower vs. Full Body splits), the prompt instructs the model to consider 2–3 options, evaluate trade-offs for the user's specific context, and recommend the best fit. This reduces the variance of responses across sessions.
-
-### Self-Criticism
-Before finalising any plan, the model internally asks: *"Is this safe? Is this realistic for this user? Did I miss anything?"* and revises if needed. This catches issues like prescribing exercises that conflict with reported injuries or suggesting unrealistic calorie targets.
-
-### Ensembling & Universal Self-Consistency
-During prompt development, we generated responses from multiple prompt variants and selected the best structural elements from each. This "ensembling" of prompt designs resulted in a final prompt that combines the strengths of each technique.
+### 3. Cross-Domain Side Query Mid-Flow
+```
+"Create a diet plan"
+→ [mid profile intake — stops here]
+"get my workout for tuesday"
+→ Active-turn gate: side_workout (diet intake frozen, not abandoned)
+→ Tuesday workout answered from stored workout plan
+→ Diet intake resumes exactly where it left off
+```
+*Covers: active-turn gate logic, cross-domain side query, workflow state preservation.*
 
 ---
 
-## Reflection on Prompt Effectiveness
+### 4. Model C Archived Plan Restore
+```
+[Have a confirmed omnivore diet plan]
+"Create a vegan diet plan"
+→ Generated + confirmed → omnivore plan auto-archived (status: archived)
 
-### Technique Comparison
+"get my old omnivore plan"
+→ PlanResolver fuzzy-matches archived plan by descriptor
+→ "Reply restore to make this your active diet plan"
 
-| Technique | Quality Impact | Ease of Use | Best For |
-|-----------|---------------|-------------|----------|
-| **Zero-Shot** | ⭐⭐ Low | ⭐⭐⭐⭐⭐ Very Easy | Initial prototyping, simple queries |
-| **Few-Shot** | ⭐⭐⭐⭐⭐ Very High | ⭐⭐⭐⭐ Easy | Controlling output format and tone |
-| **Chain-of-Thought** | ⭐⭐⭐⭐⭐ Very High | ⭐⭐⭐ Moderate | Complex reasoning, multi-step plans |
-| **Analogical** | ⭐⭐⭐⭐ High | ⭐⭐⭐⭐ Easy | Education, beginner-friendly content |
-| **Generate-Knowledge** | ⭐⭐⭐⭐⭐ Very High | ⭐⭐⭐ Moderate | Scientific accuracy, trust-building |
+"restore"
+→ Vegan plan archived, omnivore plan reactivated
+→ RAG chunks swapped (omnivore chunks → active, vegan chunks → archived)
 
-### Key Insights
-
-1. **Few-Shot had the single biggest impact.** The jump from Zero-Shot to Few-Shot was dramatic — it transformed vague, inconsistent responses into structured, actionable plans. Providing examples is the most reliable way to control model output.
-
-2. **Chain-of-Thought + Generate-Knowledge is the power combo.** When combined, these two techniques produced responses that were both well-reasoned *and* scientifically grounded. CoT ensured logical structure; GK ensured factual accuracy.
-
-3. **Analogical prompting adds warmth without sacrificing precision.** It made FITGEN.AI feel more like a real coach and less like a textbook. However, it needed to be constrained — too many analogies made responses feel condescending.
-
-4. **Self-Criticism was the most effective advanced technique.** It served as an internal safety net, catching issues that other techniques missed (e.g., exercise contraindications for injuries).
-
-5. **Layering techniques is more effective than using any single technique.** The final system prompt is not simply the sum of individual techniques — the interplay between them creates emergent qualities. CoT gives structure to GK-generated knowledge; Few-Shot examples demonstrate how analogies should be used; Self-Criticism validates the output of all other techniques.
-
-### Challenges
-
-- **Prompt length:** Layering multiple techniques creates long system prompts. We mitigated this by being concise in instructions and relying on examples to carry most of the weight.
-- **Balancing verbosity vs. completeness:** CoT and GK tend to produce longer responses. We added explicit instructions to keep reasoning brief unless the user requests details.
-- **Example selection for Few-Shot:** The examples chosen heavily influenced output style. We iterated through several examples before finding the right balance of depth, structure, and personality.
-
-### Conclusion
-
-Prompt engineering is not a one-shot activity — it is an iterative design process. Each technique revealed different strengths and weaknesses, and the final FITGEN.AI system prompt is the result of systematically layering, testing, and refining these techniques. The most important lesson: **start simple (Zero-Shot), add structure (Few-Shot), add reasoning (CoT), add grounding (GK), and then validate everything (Self-Criticism).**
+"What should I eat for lunch on Monday?"
+→ Answers from the now-active omnivore plan
+```
+*Covers: one-active-plan invariant, PlanResolver, archive/restore flow, RAG chunk swap.*
 
 ---
 
+### 5. Out-of-Scope Guardrail
+```
+"Write me a Python script to scrape Instagram"
+→ Scope guardrail fires
+→ "I'm your fitness and nutrition coach — I can only help with diet and workout planning..."
+```
+*Covers: safety guardrails, scope redirect.*
+
+---
+
+## Contributing
+
+This is a research/capstone project. To extend it:
+
+- **Add a new domain** (e.g., sleep coaching, mental wellness) — mirror the `diet_tool.py` + `workout_tool.py` pattern and register the tool in `agent/tools/__init__.py`
+- **Add a new intent handler** — add the intent to `types.py`, add a handler method in the tool, register it in `_HANDLERS`
+- **Swap the embedding model** — update `agent/rag/personal/embedder.py` and re-index via `scripts/backfill_plan_chunks.py`
+- **Add a prompting technique** — add it to `agent/prompts/base_prompts.py` and `agent/prompts/techniques.py`
 
 ---
 
 ## License
 
-This project is developed as part of an academic assignment. All rights reserved.
+MIT License — see `LICENSE` file for details.
+
+---
+
+*Built with LangGraph · OpenAI · MongoDB Atlas · Redis · Streamlit*
